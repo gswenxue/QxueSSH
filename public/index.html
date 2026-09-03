@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+  <title>QxueSSH - 在线 SSH 终端 | Web SSH 客户端</title>
+  <meta name="description" content="QxueSSH 是一款现代化在线 SSH 终端，支持多标签 Web SSH 连接、主机收藏与备注、SFTP 文件管理、实时系统监控（CPU/内存/磁盘/网速）、自定义快捷键与多主题，手机电脑均可使用。">
+  <meta name="keywords" content="QxueSSH,在线SSH,WebSSH,SSH终端,SSH客户端,SFTP,服务器监控,Linux管理,远程连接">
+  <meta name="author" content="QxueSSH">
+  <meta name="robots" content="index, follow">
+  <meta name="application-name" content="QxueSSH">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="QxueSSH - 在线 SSH 终端">
+  <meta property="og:description" content="现代化在线 SSH 终端：多标签连接、主机收藏、文件管理、实时监控、自定义快捷键，手机电脑均可使用。">
+  <meta property="og:image" content="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png">
+  <meta property="og:site_name" content="QxueSSH">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="QxueSSH - 在线 SSH 终端">
+  <meta name="twitter:description" content="现代化在线 SSH 终端：多标签连接、主机收藏、文件管理、实时监控、自定义快捷键。">
+  <meta name="twitter:image" content="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png">
+  <link rel="icon" type="image/png" href="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png" onerror="this.remove();document.querySelector('.brand-logo')&&document.querySelector('.brand-logo').classList.add('icon-fallback')">
+  <link rel="apple-touch-icon" href="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="qxue-light">
+  <div id="app">
+
+    <!-- 顶栏 -->
+    <header id="topbar">
+      <div class="brand">
+        <img class="brand-logo-img" src="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png" alt="QxueSSH"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <span class="brand-logo" style="display:none">Q</span>
+        <span class="brand-name">QxueSSH</span>
+      </div>
+      <div class="topbar-right">
+        <div id="userArea">
+          <button id="btnLogin" class="btn btn-ghost">登录</button>
+        </div>
+        <button id="btnSettings" class="btn btn-ghost" title="设置">⚙ 设置</button>
+      </div>
+    </header>
+
+    <!-- 主区域 -->
+    <div id="main">
+      <!-- 图标菜单 -->
+      <nav id="menu">
+        <button class="menu-item active" data-panel="hosts" title="连接">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <span>连接</span>
+        </button>
+        <button class="menu-item" data-panel="files" title="文件">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+          <span>文件</span>
+        </button>
+        <button class="menu-item" data-panel="monitor" title="监控">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+          <span>监控</span>
+        </button>
+        <button class="menu-item" data-panel="docker" title="容器">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/></svg>
+          <span>容器</span>
+        </button>
+        <button class="menu-item" data-panel="keys" title="快捷键">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg>
+          <span>快捷键</span>
+        </button>
+      </nav>
+
+      <!-- 侧边面板 -->
+      <aside id="panel">
+        <!-- 连接面板 -->
+        <div class="panel-page active" id="panel-hosts">
+          <div class="panel-header">
+            <span class="panel-title">我的主机</span>
+            <div class="panel-actions">
+              <button class="btn btn-sm btn-primary" id="btnAddHost">+ 新增</button>
+              <button class="btn btn-sm btn-ghost" id="btnQuickConnect" title="临时连接，不保存">快速连接</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div id="guestTip" class="tip hidden"></div>
+            <div id="hostList" class="host-list"></div>
+          </div>
+        </div>
+
+        <!-- 文件面板 -->
+        <div class="panel-page" id="panel-files">
+          <div class="panel-header">
+            <span class="panel-title">文件管理</span>
+            <div class="panel-actions">
+              <button class="btn btn-sm btn-ghost" id="btnUpload" title="上传文件">↑上传</button>
+              <button class="btn btn-sm btn-ghost" id="btnNewFolder">+目录</button>
+              <button class="btn btn-sm btn-ghost" id="btnNewFile">+文件</button>
+              <button class="btn btn-sm btn-ghost" id="btnRefreshFiles">↻</button>
+            </div>
+          </div>
+          <div id="fileBreadcrumb" class="breadcrumb"></div>
+          <div class="panel-body">
+            <div id="fileList" class="file-list">
+              <div class="empty-hint">请先连接主机</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 监控面板 -->
+        <div class="panel-page" id="panel-monitor">
+          <div class="panel-header"><span class="panel-title">系统监控</span></div>
+          <div class="panel-body" id="monitorPanel">
+            <div class="empty-hint">连接主机后显示监控数据</div>
+          </div>
+        </div>
+
+        <!-- 容器管理面板 -->
+        <div class="panel-page" id="panel-docker">
+          <div class="panel-header">
+            <span class="panel-title">容器管理</span>
+            <div class="panel-actions">
+              <button class="btn btn-sm btn-ghost" id="btnDockerRefresh" title="刷新">↻</button>
+            </div>
+          </div>
+          <div class="panel-body" id="dockerPanel">
+            <div class="empty-hint">连接主机后显示容器信息</div>
+          </div>
+        </div>
+
+        <!-- 快捷键面板 -->
+        <div class="panel-page" id="panel-keys">
+          <div class="panel-header">
+            <span class="panel-title">快捷按键</span>
+            <div class="panel-actions">
+              <button class="btn btn-sm btn-primary" id="btnAddKey">+ 自定义</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <p class="tip">为手机 / 平板设计的终端快捷键，点击即发送到当前终端。复制：电脑拖动选中后右键或 Ctrl+Shift+C；手机点「选择」，当前屏幕内容会以普通文本弹窗展示，长按即可选中复制。粘贴：点「粘贴」或右键。自定义快捷键需登录使用（云端记忆）。</p>
+            <div id="keysPanelGrid" class="keys-grid"></div>
+            <div id="customKeysWrap"></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 面板折叠按钮 -->
+      <button id="panelToggle" title="收起/展开侧栏">‹</button>
+
+      <!-- 终端区域 -->
+      <section id="terminalArea">
+        <div id="tabs">
+          <div id="tabList"></div>
+          <button id="btnNewTab" class="btn btn-sm btn-ghost" title="新标签页（快速连接）">+</button>
+        </div>
+        <div id="terminals"></div>
+        <!-- 终端下方快捷键条（可在设置开关） -->
+        <div id="quickKeysBar">
+          <div class="qk-group" id="qkMain"></div>
+          <div class="qk-group" id="qkArrows"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 底部监控条 -->
+    <footer id="monitorBar">
+      <div class="m-item" id="mConn">
+        <span class="m-label">状态</span>
+        <span class="m-value" id="mConnVal">未连接</span>
+      </div>
+      <div class="m-item">
+        <span class="m-label">CPU</span>
+        <span class="m-value" id="mCpuVal">--</span>
+        <div class="m-bar"><div class="m-bar-fill" id="mCpuBar"></div></div>
+      </div>
+      <div class="m-item">
+        <span class="m-label">内存</span>
+        <span class="m-value" id="mMemVal">--</span>
+        <div class="m-bar"><div class="m-bar-fill" id="mMemBar"></div></div>
+      </div>
+      <div class="m-item">
+        <span class="m-label">磁盘</span>
+        <span class="m-value" id="mDiskVal">--</span>
+        <div class="m-bar"><div class="m-bar-fill" id="mDiskBar"></div></div>
+      </div>
+      <div class="m-item">
+        <span class="m-label">↓下载</span>
+        <span class="m-value" id="mRxVal">--</span>
+      </div>
+      <div class="m-item">
+        <span class="m-label">↑上传</span>
+        <span class="m-value" id="mTxVal">--</span>
+      </div>
+      <div class="m-item m-item-load">
+        <span class="m-label">负载</span>
+        <span class="m-value" id="mLoadVal">--</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 登录弹窗 -->
+  <div class="modal-mask hidden" id="loginModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="loginTitle">登录 QxueSSH</span>
+        <button class="modal-close" data-close="loginModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs-switch">
+          <button class="active" data-auth-tab="login">登录</button>
+          <button data-auth-tab="register">注册</button>
+        </div>
+        <div class="form">
+          <label>用户名</label>
+          <input type="text" id="authUsername" placeholder="用户名" autocomplete="username">
+          <label>密码</label>
+          <input type="password" id="authPassword" placeholder="密码" autocomplete="current-password">
+          <label>验证码</label>
+          <div class="captcha-row">
+            <input type="text" id="authCaptcha" placeholder="请输入验证码" autocomplete="off" maxlength="4">
+            <div class="captcha-img" id="captchaImg" title="点击刷新验证码"></div>
+          </div>
+          <div class="form-error hidden" id="authError"></div>
+          <button class="btn btn-primary btn-block" id="btnAuthSubmit">登录</button>
+          <p class="tip">登录后可保存主机、备注与连接记录；未登录也可直接使用快速连接。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主机编辑弹窗 -->
+  <div class="modal-mask hidden" id="hostModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="hostModalTitle">新增主机</span>
+        <button class="modal-close" data-close="hostModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form">
+          <label>名称（可选）</label>
+          <input type="text" id="hostLabel" placeholder="如：生产服务器">
+          <label>备注</label>
+          <input type="text" id="hostRemark" placeholder="备注信息，如：腾讯云 2C4G">
+          <label>主机地址 *</label>
+          <input type="text" id="hostHost" placeholder="IP 或域名">
+          <div class="form-row">
+            <div><label>端口</label><input type="number" id="hostPort" value="22"></div>
+            <div><label>用户名 *</label><input type="text" id="hostUsername" placeholder="root"></div>
+          </div>
+          <div class="tabs-switch">
+            <button class="active" data-authtype="password">密码登录</button>
+            <button data-authtype="key">密钥登录</button>
+          </div>
+          <div id="authPasswordWrap">
+            <label>密码</label>
+            <input type="password" id="hostPassword" placeholder="登录密码">
+          </div>
+          <div id="authKeyWrap" class="hidden">
+            <label>私钥</label>
+            <textarea id="hostPrivateKey" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+            <label>密钥口令（可选）</label>
+            <input type="password" id="hostKeyPassphrase" placeholder="无口令可留空">
+          </div>
+          <div class="form-error hidden" id="hostError"></div>
+          <button class="btn btn-primary btn-block" id="btnHostSave">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 快速连接弹窗 -->
+  <div class="modal-mask hidden" id="quickModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>快速连接</span>
+        <button class="modal-close" data-close="quickModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form">
+          <p class="tip">临时连接，不保存到主机列表。</p>
+          <label>主机地址 *</label>
+          <input type="text" id="qcHost" placeholder="IP 或域名">
+          <div class="form-row">
+            <div><label>端口</label><input type="number" id="qcPort" value="22"></div>
+            <div><label>用户名 *</label><input type="text" id="qcUsername" placeholder="root"></div>
+          </div>
+          <label>密码</label>
+          <input type="password" id="qcPassword" placeholder="登录密码">
+          <div class="form-error hidden" id="qcError"></div>
+          <button class="btn btn-primary btn-block" id="btnQcConnect">连接</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal-mask hidden" id="settingsModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>设置</span>
+        <button class="modal-close" data-close="settingsModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form">
+          <label>主题</label>
+          <select id="setTheme">
+            <option value="qxue-light">Qxue 浅色（默认）</option>
+            <option value="qxue-dark">Qxue 深色</option>
+            <option value="dracula">Dracula</option>
+            <option value="nord">Nord</option>
+            <option value="solarized-dark">Solarized Dark</option>
+            <option value="midnight">午夜蓝</option>
+          </select>
+          <label>终端字体大小：<span id="fontSizeVal">14</span> px</label>
+          <input type="range" id="setFontSize" min="10" max="24" step="1" value="14">
+          <label class="check-row">
+            <input type="checkbox" id="setQuickKeys" checked>
+            <span>显示终端快捷键条（移动端默认开启，电脑端默认关闭）</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="setMonitorBar" checked>
+            <span>显示底部长条监控</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文件查看/编辑弹窗 -->
+  <div class="modal-mask hidden" id="fileModal">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <span id="fileModalTitle">文件</span>
+        <button class="modal-close" data-close="fileModal">×</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="fileEditor" spellcheck="false" autocomplete="off"></textarea>
+        <div class="modal-footer-btns">
+          <span class="tip" id="fileMeta"></span>
+          <div>
+            <button class="btn btn-ghost" id="btnFileDownload">下载</button>
+            <button class="btn btn-primary" id="btnFileSave">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 个人设置弹窗 -->
+  <div class="modal-mask hidden" id="profileModal">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <span>个人设置</span>
+        <button class="modal-close" data-close="profileModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs-switch profile-tabs">
+          <button class="active" data-ptab="account">账号</button>
+          <button data-ptab="cloud">云数据</button>
+          <button data-ptab="admin" id="ptabAdminBtn" class="hidden">站点详情</button>
+        </div>
+
+        <!-- 账号 -->
+        <div class="ptab-page" id="ptab-account">
+          <div class="profile-head">
+            <div class="profile-avatar" id="pfAvatar">Q</div>
+            <div>
+              <div class="profile-name" id="pfName">--</div>
+              <div class="profile-sub" id="pfSub">--</div>
+            </div>
+          </div>
+          <div class="pf-section">
+            <div class="pf-section-title">账号登录记录</div>
+            <div id="pfLoginLog" class="login-log">加载中…</div>
+          </div>
+          <div class="pf-section">
+            <div class="pf-section-title">修改密码</div>
+            <div class="form">
+              <label>原密码</label>
+              <input type="password" id="pfOldPass" placeholder="当前密码">
+              <label>新密码</label>
+              <input type="password" id="pfNewPass" placeholder="至少 4 位">
+              <div class="form-error hidden" id="pfPassErr"></div>
+              <button class="btn btn-primary" id="btnChangePass">修改密码</button>
+            </div>
+          </div>
+          <div class="pf-section pf-danger-zone">
+            <div class="pf-section-title">注销账号</div>
+            <p class="tip">注销后将删除该账号及其所有云端数据（主机、快捷键、登录记录），不可恢复。</p>
+            <button class="btn btn-danger" id="btnDeleteAccount">注销账号</button>
+          </div>
+        </div>
+
+        <!-- 云数据 -->
+        <div class="ptab-page hidden" id="ptab-cloud">
+          <div class="pf-section">
+            <div class="sync-status">
+              <div class="sync-icon">☁</div>
+              <div>
+                <div class="sync-title">云端数据</div>
+                <div class="profile-sub" id="pfSyncInfo">加载中…</div>
+              </div>
+            </div>
+            <div class="sync-btns">
+              <button class="btn btn-primary" id="btnSyncPush">↑ 同步到云端</button>
+              <button class="btn" id="btnSyncPull">↓ 从远端同步</button>
+              <button class="btn btn-danger" id="btnSyncClear">清除云端数据</button>
+            </div>
+            <p class="tip">同步到云端：将当前数据立即写入云端存储；从远端同步：放弃本地未保存状态，以云端数据为准刷新；清除云端数据：删除云端保存的全部主机与自定义快捷键。</p>
+          </div>
+        </div>
+
+        <!-- 站点详情（仅管理员） -->
+        <div class="ptab-page hidden" id="ptab-admin">
+          <div class="pf-section">
+            <div class="admin-stat-row">
+              <div class="admin-stat">
+                <div class="admin-stat-num" id="adUserCount">--</div>
+                <div class="profile-sub">已注册用户</div>
+              </div>
+              <div class="admin-stat">
+                <div class="admin-stat-num" id="adHostCount">--</div>
+                <div class="profile-sub">保存的主机</div>
+              </div>
+              <div class="admin-stat">
+                <label class="switch-row">
+                  <input type="checkbox" id="adRegSwitch">
+                  <span>开放站点注册</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="pf-section">
+            <div class="pf-section-title">用户列表</div>
+            <div id="adUserList" class="admin-user-list">加载中…</div>
+            <div id="adPager" class="pager hidden">
+              <button class="btn btn-sm" id="adPrev">‹ 上一页</button>
+              <span id="adPageInfo" class="pager-info"></span>
+              <button class="btn btn-sm" id="adNext">下一页 ›</button>
+            </div>
+          </div>
+
+          <!-- 站点备份（仅管理员） -->
+          <div class="pf-section">
+            <div class="pf-section-title">站点备份</div>
+            <label class="switch-row">
+              <input type="checkbox" id="bkEnabled">
+              <span>启用自动备份到 WebDAV 网盘</span>
+            </label>
+            <div class="bk-form">
+              <label>WebDAV 地址（备份上传目录）</label>
+              <input type="text" id="bkUrl" placeholder="例如 https://dav.jianguoyun.com/dav/备份/QxueSSH/">
+              <label>账号</label>
+              <input type="text" id="bkUser" autocomplete="off" placeholder="WebDAV 账号 / 邮箱">
+              <label>密码 / 应用密码（已保存，留空表示不修改）</label>
+              <input type="password" id="bkPass" autocomplete="new-password" placeholder="坚果云等请使用「应用密码」">
+              <div class="bk-row2">
+                <div>
+                  <label>备份间隔（小时）</label>
+                  <input type="number" id="bkInterval" min="1" max="720" value="24">
+                </div>
+                <div>
+                  <label>本地保留份数</label>
+                  <input type="number" id="bkRetention" min="1" max="30" value="5">
+                </div>
+              </div>
+              <div class="bk-actions">
+                <button class="btn btn-sm" id="btnBkTest">测试连接</button>
+                <button class="btn btn-sm btn-primary" id="btnBkSave">保存配置</button>
+                <button class="btn btn-sm btn-primary" id="btnBkRun">立即备份</button>
+              </div>
+              <p class="tip" style="margin-top:10px">备份内容：站点数据（用户/主机/快捷键）+ 整站代码，打包为 tar.gz 上传。服务器本地同时保留最近 N 份，双重保险。恢复方法：下载备份解压到站点目录后重启服务即可。</p>
+              <div id="bkStatus" class="bk-status"></div>
+              <div id="bkLog" class="bk-log"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 粘贴弹窗 -->
+  <div class="modal-mask hidden" id="pasteModal">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span>粘贴到终端</span>
+        <button class="modal-close" data-close="pasteModal">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="tip">在下方输入框中粘贴内容（Ctrl+V / Cmd+V / 手机长按粘贴），再点击发送。</p>
+        <textarea id="pasteArea" rows="5" placeholder="在此粘贴要发送到终端的内容…"></textarea>
+        <button class="btn btn-primary btn-block" id="btnPasteOk" style="margin-top:10px">发送到终端</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 屏幕内容弹窗：以普通文本展示终端当前屏幕，方便长按复制 -->
+  <div class="modal-mask hidden" id="screenModal">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <span>终端屏幕内容</span>
+        <button class="modal-close" data-close="screenModal">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="tip">当前屏幕内容已转为普通文本，可长按或拖动选中后复制。</p>
+        <textarea id="screenArea" rows="14" readonly placeholder="连接终端后这里会显示屏幕内容…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自定义快捷键弹窗 -->
+  <div class="modal-mask hidden" id="keyModal">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span id="keyModalTitle">自定义快捷键</span>
+        <button class="modal-close" data-close="keyModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form">
+          <label>按键 1</label>
+          <select id="keySlot1"></select>
+          <label>按键 2</label>
+          <select id="keySlot2"></select>
+          <label>按键 3（可选，实现三键组合）</label>
+          <select id="keySlot3"></select>
+          <label>备注（可选，不填则显示按键组合名）</label>
+          <input type="text" id="keyLabel" placeholder="如：新开标签">
+          <div class="key-preview" id="keyPreview"></div>
+          <div class="form-error hidden" id="keyError"></div>
+          <button class="btn btn-primary btn-block" id="btnKeySave">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 确认弹窗 -->
+  <div class="modal-mask hidden" id="confirmModal">
+    <div class="modal modal-sm">
+      <div class="modal-header"><span id="confirmTitle">确认</span><button class="modal-close" data-close="confirmModal">×</button></div>
+      <div class="modal-body">
+        <p id="confirmMsg" class="confirm-msg"></p>
+        <div class="modal-footer-btns">
+          <button class="btn btn-ghost" data-close="confirmModal">取消</button>
+          <button class="btn btn-danger" id="btnConfirmOk">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 容器日志弹窗 -->
+  <div class="modal-mask hidden" id="dockerLogModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="dockerLogTitle">容器日志</span>
+        <button class="modal-close" data-close="dockerLogModal">×</button>
+      </div>
+      <div class="modal-body">
+        <pre id="dockerLogContent" class="docker-log"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- 长时间未操作提醒弹窗 -->
+  <div class="modal-mask hidden" id="idleModal">
+    <div class="modal modal-sm">
+      <div class="modal-header"><span>会话空闲提醒</span><button class="modal-close" id="idleCloseBtn" title="保持会话">×</button></div>
+      <div class="modal-body">
+        <p id="idleMsg" class="confirm-msg"></p>
+        <div class="modal-footer-btns">
+          <button class="btn btn-ghost" id="btnIdleDisconnect">断开连接</button>
+          <button class="btn btn-primary" id="btnIdleKeep">保持会话（<span id="idleCount">15</span>s）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 输入弹窗（新建文件/目录/重命名） -->
+  <div class="modal-mask hidden" id="inputModal">
+    <div class="modal modal-sm">
+      <div class="modal-header"><span id="inputTitle">输入</span><button class="modal-close" data-close="inputModal">×</button></div>
+      <div class="modal-body">
+        <div class="form">
+          <input type="text" id="inputValue" placeholder="">
+          <div class="form-error hidden" id="inputError"></div>
+          <button class="btn btn-primary btn-block" id="btnInputOk">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <input type="file" id="uploadInput" class="hidden">
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

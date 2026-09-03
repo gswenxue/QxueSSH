@@ -1,0 +1,17 @@
+# 运行时数据（含用户/主机/token，首次启动自动生成，切勿提交）
+data/
+
+# 依赖
+node_modules/
+
+# 日志与临时文件
+*.log
+nohup.out
+
+# 备份文件
+*.bak
+*.bak-*
+
+# 系统文件
+.DS_Store
+Thumbs.db
