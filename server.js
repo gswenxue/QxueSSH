@@ -111,6 +111,27 @@ loadDB();
 /* ---------------- HTTP API ---------------- */
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+
+// 预压缩静态资源：若存在 <file>.gz 且浏览器支持 gzip，直接发送（零运行时压缩开销）
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use((req, res, next) => {
+  if (req.method !== 'GET' || !/(gzip|deflate|br)/i.test(req.headers['accept-encoding'] || '')) return next();
+  const rel = req.path === '/' ? '/index.html' : req.path; // 首页映射到 index.html
+  const gzPath = path.join(PUBLIC_DIR, rel + '.gz');
+  // 防路径穿越：归一化后必须仍在 public 目录内
+  if (!gzPath.startsWith(PUBLIC_DIR + path.sep)) return next();
+  fs.stat(gzPath, (err, st) => {
+    if (err || !st.isFile()) return next();
+    const types = { '.js': 'application/javascript', '.css': 'text/css', '.html': 'text/html', '.svg': 'image/svg+xml', '.json': 'application/json' };
+    res.set({
+      'Content-Encoding': 'gzip',
+      'Content-Type': types[path.extname(rel)] || 'application/octet-stream',
+      'Vary': 'Accept-Encoding',
+      'Cache-Control': 'public, max-age=86400'
+    });
+    fs.createReadStream(gzPath).pipe(res);
+  });
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 const app_ = express.Router();

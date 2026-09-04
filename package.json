@@ -10,7 +10,14 @@
     "type": "git",
     "url": "git+https://github.com/gswenxue/QxueSSH.git"
   },
-  "keywords": ["ssh", "webssh", "terminal", "sftp", "docker", "monitor"],
+  "keywords": [
+    "ssh",
+    "webssh",
+    "terminal",
+    "sftp",
+    "docker",
+    "monitor"
+  ],
   "license": "MIT",
   "dependencies": {
     "bcryptjs": "^2.4.3",

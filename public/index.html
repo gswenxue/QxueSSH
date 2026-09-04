@@ -12,15 +12,15 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="QxueSSH - 在线 SSH 终端">
   <meta property="og:description" content="现代化在线 SSH 终端：多标签连接、主机收藏、文件管理、实时监控、自定义快捷键，手机电脑均可使用。">
-  <meta property="og:image" content="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png">
+  <meta property="og:image" content="/logo.png">
   <meta property="og:site_name" content="QxueSSH">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="QxueSSH - 在线 SSH 终端">
   <meta name="twitter:description" content="现代化在线 SSH 终端：多标签连接、主机收藏、文件管理、实时监控、自定义快捷键。">
-  <meta name="twitter:image" content="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png">
-  <link rel="icon" type="image/png" href="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png" onerror="this.remove();document.querySelector('.brand-logo')&&document.querySelector('.brand-logo').classList.add('icon-fallback')">
-  <link rel="apple-touch-icon" href="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+  <meta name="twitter:image" content="/logo.png">
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="apple-touch-icon" href="logo.png">
+  <link rel="stylesheet" href="vendor/xterm.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-theme="qxue-light">
@@ -29,7 +29,7 @@
     <!-- 顶栏 -->
     <header id="topbar">
       <div class="brand">
-        <img class="brand-logo-img" src="https://esaimg.cdn1.vip/i/6a953041081f2_1788162113.png" alt="QxueSSH"
+        <img class="brand-logo-img" src="logo.png" alt="QxueSSH"
              onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
         <span class="brand-logo" style="display:none">Q</span>
         <span class="brand-name">QxueSSH</span>
@@ -620,8 +620,8 @@
 
   <input type="file" id="uploadInput" class="hidden" multiple>
 
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="vendor/xterm.min.js"></script>
+  <script src="vendor/xterm-addon-fit.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
 </body>
