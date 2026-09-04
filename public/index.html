@@ -90,6 +90,8 @@
           <div class="panel-header">
             <span class="panel-title">文件管理</span>
             <div class="panel-actions">
+              <button class="btn btn-sm btn-primary hidden" id="btnPaste" title="粘贴到当前目录">粘贴</button>
+              <button class="btn btn-sm btn-ghost hidden" id="btnPasteClear" title="取消复制/剪切">✕</button>
               <button class="btn btn-sm btn-ghost" id="btnUpload" title="上传文件">↑上传</button>
               <button class="btn btn-sm btn-ghost" id="btnNewFolder">+目录</button>
               <button class="btn btn-sm btn-ghost" id="btnNewFile">+文件</button>
@@ -585,10 +587,29 @@
     </div>
   </div>
 
+  <!-- 上传弹窗（支持拖拽） -->
+  <div class="modal-mask hidden" id="uploadModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>上传文件</span>
+        <button class="modal-close" data-close="uploadModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="upload-target">上传到：<code id="uploadTargetPath"></code></div>
+        <div class="upload-drop" id="uploadDrop">
+          <div class="upload-drop-icon">⬆</div>
+          <div class="upload-drop-main">拖拽文件到此处</div>
+          <div class="upload-drop-sub">或点击选择（支持多选）</div>
+        </div>
+        <div id="uploadQueue"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast"></div>
 
-  <input type="file" id="uploadInput" class="hidden">
+  <input type="file" id="uploadInput" class="hidden" multiple>
 
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>

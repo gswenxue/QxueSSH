@@ -1069,23 +1069,31 @@ function renderBreadcrumb(p) {
 
 function renderFiles(list) {
   const el = $('#fileList');
+  updatePasteBtn();
   if (!list) {
     const c = currentFileConn();
     el.innerHTML = `<div class="empty-hint">${c ? '加载中…' : '请先连接主机（左侧「连接」面板）'}</div>`;
     return;
   }
+  state.fileList = list;
   if (!list.length) { el.innerHTML = '<div class="empty-hint">空目录</div>'; return; }
-  el.innerHTML = list.map(f => `
-    <div class="file-row" data-name="${escapeHtml(f.name)}" data-type="${f.type}">
+  el.innerHTML = list.map(f => {
+    const full = joinPath(state.filePath, f.name);
+    const isCut = state.clipboard && state.clipboard.mode === 'cut' && state.clipboard.path === full;
+    return `
+    <div class="file-row${isCut ? ' is-cut' : ''}" data-name="${escapeHtml(f.name)}" data-type="${f.type}">
       <span class="f-icon">${f.type === 'dir' ? '📁' : f.type === 'link' ? '🔗' : '📄'}</span>
       <span class="f-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
       <span class="f-size">${f.type === 'file' ? fmtBytes(f.size) : ''}</span>
       <span class="f-act">
+        <button class="cp" title="复制">⧉</button>
+        <button class="mv" title="剪切">✂</button>
         <button class="rn" title="重命名">✎</button>
         <button class="dl" title="下载">⭳</button>
         <button class="del" title="删除">🗑</button>
       </span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   el.querySelectorAll('.file-row').forEach(row => {
     const name = row.dataset.name;
     const type = row.dataset.type;
@@ -1096,6 +1104,8 @@ function renderFiles(list) {
       else if (type === 'file') openFile(full, name);
       else toast('暂不支持打开符号链接');
     });
+    row.querySelector('.cp').addEventListener('click', () => setClipboard('copy', full, name, type));
+    row.querySelector('.mv').addEventListener('click', () => setClipboard('cut', full, name, type));
     row.querySelector('.rn').addEventListener('click', () => {
       inputDlg('重命名', '新名称', name, v => {
         if (v === name) return;
@@ -1110,6 +1120,69 @@ function renderFiles(list) {
     });
   });
 }
+
+/* --- 复制 / 剪切 / 粘贴 --- */
+state.clipboard = null; // { mode: 'copy'|'cut', path, name, type, connId }
+
+function setClipboard(mode, path, name, type) {
+  const c = currentFileConn();
+  if (!c) return;
+  state.clipboard = { mode, path, name, type, connId: c.connId };
+  updatePasteBtn();
+  renderFiles(state.fileList); // 刷新剪切高亮
+  toast(`${mode === 'copy' ? '已复制' : '已剪切'}「${name}」，进入目标目录后点击顶部「粘贴」`, 'ok');
+}
+
+function updatePasteBtn() {
+  const btn = $('#btnPaste'), clr = $('#btnPasteClear');
+  const cb = state.clipboard;
+  const c = currentFileConn();
+  if (!cb || !c || cb.connId !== c.connId) {
+    btn.classList.add('hidden');
+    clr.classList.add('hidden');
+    return;
+  }
+  btn.textContent = `${cb.mode === 'copy' ? '⧉' : '✂'} 粘贴「${cb.name}」`;
+  btn.title = `${cb.mode === 'copy' ? '复制' : '剪切'}自 ${cb.path}，点击粘贴到当前目录`;
+  btn.classList.remove('hidden');
+  clr.classList.remove('hidden');
+}
+
+function doPaste() {
+  const cb = state.clipboard;
+  const c = currentFileConn();
+  if (!cb || !c) return;
+  const dst = joinPath(state.filePath, cb.name);
+  if (dst === cb.path) { toast('已在原位置，无需粘贴', 'err'); return; }
+  if (dst.startsWith(cb.path + '/')) { toast('不能粘贴到自身内部', 'err'); return; }
+  const perform = (preDelete) => {
+    const run = () => {
+      toast(cb.mode === 'copy' ? '正在复制…' : '正在移动…');
+      sftpCall(cb.mode === 'cut' ? 'c:sftp:move' : 'c:sftp:copy', { path: cb.path, newPath: dst }, (res, err) => {
+        if (err) return;
+        toast(cb.mode === 'cut' ? '已移动' : '已复制', 'ok');
+        if (cb.mode === 'cut') { state.clipboard = null; updatePasteBtn(); }
+        listFiles(state.filePath);
+      });
+    };
+    if (preDelete) sftpCall('c:sftp:delete', { path: dst }, () => run());
+    else run();
+  };
+  // 同名冲突检查
+  const exists = (state.fileList || []).some(f => f.name === cb.name);
+  if (exists) {
+    confirmDlg('覆盖确认', `当前目录已存在同名「${cb.name}」，覆盖后将删除原有${cb.type === 'dir' ? '目录（仅空目录可删）' : '文件'}，继续吗？`, () => perform(true));
+  } else {
+    perform(false);
+  }
+}
+
+$('#btnPaste').addEventListener('click', doPaste);
+$('#btnPasteClear').addEventListener('click', () => {
+  state.clipboard = null;
+  updatePasteBtn();
+  renderFiles(state.fileList);
+});
 
 function joinPath(dir, name) {
   if (dir.endsWith('/')) return dir + name;
@@ -1189,23 +1262,88 @@ $('#btnNewFolder').addEventListener('click', () => {
   });
 });
 $('#btnRefreshFiles').addEventListener('click', () => listFiles(state.filePath));
+
+/* --- 上传（弹窗 + 拖拽 + 多文件队列） --- */
+let uploading = false;
 $('#btnUpload').addEventListener('click', () => {
   if (!currentFileConn()) { toast('请先连接主机', 'err'); return; }
-  $('#uploadInput').click();
+  $('#uploadTargetPath').textContent = state.filePath;
+  $('#uploadQueue').innerHTML = '';
+  showEl('uploadModal');
 });
-$('#uploadInput').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
+// 点击拖拽区 → 选择文件
+$('#uploadDrop').addEventListener('click', () => $('#uploadInput').click());
+// 拖拽高亮
+['dragenter', 'dragover'].forEach(ev => $('#uploadDrop').addEventListener(ev, e => {
+  e.preventDefault();
+  e.stopPropagation();
+  $('#uploadDrop').classList.add('drag');
+}));
+['dragleave', 'drop'].forEach(ev => $('#uploadDrop').addEventListener(ev, e => {
+  e.preventDefault();
+  e.stopPropagation();
+  $('#uploadDrop').classList.remove('drag');
+}));
+// 弹窗内其他区域阻止浏览器默认打开文件
+$('#uploadModal').addEventListener('dragover', e => e.preventDefault());
+$('#uploadModal').addEventListener('drop', e => e.preventDefault());
+// 放下文件
+$('#uploadDrop').addEventListener('drop', e => {
+  const items = Array.from(e.dataTransfer.items || []);
+  const entries = items.filter(it => it.kind === 'file').map(it => it.webkitGetAsEntry && it.webkitGetAsEntry());
+  if (entries.some(en => en && en.isDirectory)) {
+    toast('暂不支持拖拽上传文件夹，请拖拽文件', 'err');
+    return;
+  }
+  const files = Array.from(e.dataTransfer.files || []);
+  if (files.length) uploadFiles(files);
+});
+// 点击选择（已改为 multiple 多选）
+$('#uploadInput').addEventListener('change', e => {
+  const files = Array.from(e.target.files || []);
   e.target.value = '';
-  if (!file) return;
-  const buf = new Uint8Array(await file.arrayBuffer());
-  let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < buf.length; i += CHUNK) bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
-  toast('正在上传 ' + file.name + ' …');
-  sftpCall('c:sftp:upload', { path: joinPath(state.filePath, file.name), b64: btoa(bin) }, () => {
-    toast('上传完成', 'ok'); listFiles(state.filePath);
-  });
+  if (files.length) uploadFiles(files);
 });
+
+function uploadOne(file) {
+  return new Promise((resolve, reject) => {
+    file.arrayBuffer().then(buf => {
+      const u8 = new Uint8Array(buf);
+      let bin = '';
+      const CHUNK = 0x8000;
+      for (let i = 0; i < u8.length; i += CHUNK) bin += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+      sftpCall('c:sftp:upload', { path: joinPath(state.filePath, file.name), b64: btoa(bin) }, (res, err) => {
+        if (err) reject(new Error(err));
+        else resolve();
+      });
+    }).catch(reject);
+  });
+}
+
+async function uploadFiles(files) {
+  if (!currentFileConn()) { toast('请先连接主机', 'err'); return; }
+  if (uploading) { toast('正在上传中，请稍候', 'err'); return; }
+  uploading = true;
+  const queue = $('#uploadQueue');
+  for (const file of files) {
+    const row = document.createElement('div');
+    row.className = 'up-item';
+    row.innerHTML = `<span class="up-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>` +
+      `<span class="up-size">${fmtBytes(file.size)}</span><span class="up-status">上传中…</span>`;
+    queue.appendChild(row);
+    try {
+      await uploadOne(file);
+      row.classList.add('ok');
+      row.querySelector('.up-status').textContent = '✓ 完成';
+    } catch (err) {
+      row.classList.add('fail');
+      row.querySelector('.up-status').textContent = '✗ ' + (err.message || '失败');
+    }
+  }
+  uploading = false;
+  toast('上传处理完成', 'ok');
+  listFiles(state.filePath);
+}
 
 /* ---------------- 终端复制 / 粘贴 ---------------- */
 function activeTerm() {

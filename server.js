@@ -939,6 +939,54 @@ io.on('connection', (socket) => {
     });
   });
 
+  // 剪切（移动）：SFTP rename 即同文件系统移动，支持文件和目录
+  socket.on('c:sftp:move', ({ connId, path: src, newPath: dst } = {}, ack) => {
+    withSftp(connId, (err, sftp) => {
+      if (err) return ack && ack({ error: err.message });
+      sftp.rename(src, dst, e => ack && ack(e ? { error: e.message } : { ok: true }));
+    });
+  });
+
+  // 远程路径拼接
+  function joinRemote(a, b) { return (a.endsWith('/') ? a : a + '/') + b; }
+
+  // 复制：文件用流复制，目录递归（先建目录再逐项复制）
+  function copyEntry(sftp, src, dst, cb) {
+    sftp.stat(src, (err, st) => {
+      if (err) return cb(err);
+      if (st.isDirectory()) {
+        sftp.mkdir(dst, err2 => {
+          if (err2) return cb(err2);
+          sftp.readdir(src, (e3, items) => {
+            if (e3) return cb(e3);
+            let i = 0;
+            (function next() {
+              if (i >= items.length) return cb(null);
+              const name = items[i++].filename;
+              copyEntry(sftp, joinRemote(src, name), joinRemote(dst, name), e => e ? cb(e) : next());
+            })();
+          });
+        });
+      } else {
+        const rs = sftp.createReadStream(src);
+        const ws = sftp.createWriteStream(dst);
+        let done = false;
+        const fin = e => { if (!done) { done = true; cb(e); } };
+        rs.on('error', fin);
+        ws.on('error', fin);
+        ws.on('close', () => fin(null));
+        rs.pipe(ws);
+      }
+    });
+  }
+
+  socket.on('c:sftp:copy', ({ connId, path: src, newPath: dst } = {}, ack) => {
+    withSftp(connId, (err, sftp) => {
+      if (err) return ack && ack({ error: err.message });
+      copyEntry(sftp, src, dst, e => ack && ack(e ? { error: e.message } : { ok: true }));
+    });
+  });
+
   socket.on('c:sftp:download', ({ connId, path: p } = {}, ack) => {
     withSftp(connId, (err, sftp) => {
       if (err) return ack && ack({ error: err.message });
