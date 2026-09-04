@@ -92,6 +92,8 @@ const state = {
   activeConnId: null,
   fileConnId: null,      // 文件面板绑定的连接
   filePath: '/',
+  fileMulti: false,      // 文件多选模式
+  fileSel: new Set(),    // 多选选中的文件名（当前目录）
   ctrlArmed: false,
   diskExpanded: false,
   settings: {
@@ -310,6 +312,7 @@ function renderHosts() {
       <div class="h-addr">${escapeHtml(h.username)}@${escapeHtml(h.host)}</div>
       ${h.remark ? `<div class="h-remark" title="${escapeHtml(h.remark)}">📝 ${escapeHtml(h.remark)}</div>` : ''}
       <div class="h-actions">
+        <button class="move" title="移动排序">⇅</button>
         <button class="edit" title="编辑">✎</button>
         <button class="del" title="删除">🗑</button>
       </div>
@@ -320,6 +323,10 @@ function renderHosts() {
       if (e.target.closest('.h-actions')) return;
       const host = state.hosts.find(h => h.id === id);
       if (host) connectHost(host);
+    });
+    item.querySelector('.move').addEventListener('click', e => {
+      e.stopPropagation();
+      showHostMoveMenu(e.currentTarget, id);
     });
     item.querySelector('.edit').addEventListener('click', () => openHostModal(state.hosts.find(h => h.id === id)));
     item.querySelector('.del').addEventListener('click', () => {
@@ -334,6 +341,45 @@ function renderHosts() {
       });
     });
   });
+}
+
+/* --- 主机排序（上移/下移） --- */
+function hideHostMoveMenu() {
+  const m = document.getElementById('hostMoveMenu');
+  if (m) m.remove();
+}
+
+function showHostMoveMenu(anchor, id) {
+  hideHostMoveMenu();
+  const idx = state.hosts.findIndex(h => h.id === id);
+  if (idx < 0) return;
+  const menu = document.createElement('div');
+  menu.className = 'move-menu';
+  menu.id = 'hostMoveMenu';
+  menu.innerHTML = `
+    <button data-dir="up" ${idx <= 0 ? 'disabled' : ''}>↑ 上移一位</button>
+    <button data-dir="down" ${idx >= state.hosts.length - 1 ? 'disabled' : ''}>↓ 下移一位</button>`;
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = (r.bottom + 4) + 'px';
+  menu.style.left = Math.max(8, Math.min(r.left - 40, window.innerWidth - 140)) + 'px';
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (b.disabled) return;
+    const dir = b.dataset.dir;
+    hideHostMoveMenu();
+    try {
+      await api('/hosts/' + id + '/move', { method: 'PUT', body: { dir } });
+      const i = state.hosts.findIndex(h => h.id === id);
+      const j = dir === 'up' ? i - 1 : i + 1;
+      if (i >= 0 && j >= 0 && j < state.hosts.length) {
+        [state.hosts[i], state.hosts[j]] = [state.hosts[j], state.hosts[i]];
+        renderHosts();
+      }
+    } catch (err) { toast(err.message, 'err'); }
+  }));
+  // 点击其他区域关闭菜单（延迟绑定，避免触发本次点击）
+  setTimeout(() => document.addEventListener('click', hideHostMoveMenu, { once: true }), 0);
 }
 
 /* --- 主机编辑弹窗 --- */
@@ -533,7 +579,7 @@ function closeSession(connId) {
     if (next) switchSession(next);
     else { state.activeConnId = null; updateMonitorDisplay(); }
   }
-  if (state.fileConnId === connId) { state.fileConnId = null; renderFiles(); }
+  if (state.fileConnId === connId) { state.fileConnId = null; resetFileBrowser(); renderFiles(); }
 }
 
 /* ---------------- socket 事件 ---------------- */
@@ -549,7 +595,7 @@ socket.on('s:ssh:status', ({ connId, status, message }) => {
   const dot = c.tabEl.querySelector('.tab-status');
   dot.className = 'tab-status ' + (status === 'connected' ? 'connected' : status === 'error' ? 'error' : status === 'connecting' ? 'connecting' : '');
   if (status === 'connected') {
-    if (state.fileConnId == null) { state.fileConnId = connId; refreshFilesIfReady(); }
+    if (state.fileConnId == null) { state.fileConnId = connId; resetFileBrowser(); refreshFilesIfReady(); }
     updateMonitorDisplay();
   } else if (status === 'error') {
     c.term.writeln('\r\n\x1b[31m✗ 连接失败：' + message + '\x1b[0m');
@@ -1016,10 +1062,25 @@ function currentFileConn() {
   let c = state.conns.get(state.fileConnId);
   if (!c || c.status !== 'connected') {
     c = state.conns.get(state.activeConnId);
-    if (c && c.status === 'connected') state.fileConnId = c.connId;
+    if (c && c.status === 'connected') {
+      // 文件面板切换到了另一台主机：路径重置为根目录
+      if (state.fileConnId !== c.connId) resetFileBrowser();
+      state.fileConnId = c.connId;
+    }
     else c = null;
   }
   return c;
+}
+
+// 重置文件面板：路径回到根目录、退出多选、清空选中
+function resetFileBrowser() {
+  state.filePath = '/';
+  state.fileMulti = false;
+  state.fileSel.clear();
+  const mb = $('#btnMulti');
+  if (mb) mb.classList.remove('active');
+  updateBatchBar();
+  renderBreadcrumb('/');
 }
 
 function refreshFilesIfReady() {
@@ -1049,6 +1110,7 @@ async function listFiles(p) {
       return;
     }
     state.filePath = p;
+    state.fileSel.clear(); // 换目录后清空多选
     renderBreadcrumb(p);
     renderFiles(res.list || []);
   });
@@ -1070,6 +1132,7 @@ function renderBreadcrumb(p) {
 function renderFiles(list) {
   const el = $('#fileList');
   updatePasteBtn();
+  updateBatchBar();
   if (!list) {
     const c = currentFileConn();
     el.innerHTML = `<div class="empty-hint">${c ? '加载中…' : '请先连接主机（左侧「连接」面板）'}</div>`;
@@ -1079,9 +1142,11 @@ function renderFiles(list) {
   if (!list.length) { el.innerHTML = '<div class="empty-hint">空目录</div>'; return; }
   el.innerHTML = list.map(f => {
     const full = joinPath(state.filePath, f.name);
-    const isCut = state.clipboard && state.clipboard.mode === 'cut' && state.clipboard.path === full;
+    const isCut = state.clipboard && state.clipboard.mode === 'cut' && state.clipboard.items && state.clipboard.items.some(it => it.path === full);
+    const sel = state.fileMulti && state.fileSel.has(f.name);
     return `
-    <div class="file-row${isCut ? ' is-cut' : ''}" data-name="${escapeHtml(f.name)}" data-type="${f.type}">
+    <div class="file-row${isCut ? ' is-cut' : ''}${sel ? ' selected' : ''}" data-name="${escapeHtml(f.name)}" data-type="${f.type}">
+      ${state.fileMulti ? `<span class="f-check${sel ? ' on' : ''}">${sel ? '✓' : ''}</span>` : ''}
       <span class="f-icon">${f.type === 'dir' ? '📁' : f.type === 'link' ? '🔗' : '📄'}</span>
       <span class="f-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
       <span class="f-size">${f.type === 'file' ? fmtBytes(f.size) : ''}</span>
@@ -1100,6 +1165,7 @@ function renderFiles(list) {
     const full = joinPath(state.filePath, name);
     row.addEventListener('click', e => {
       if (e.target.closest('.f-act')) return;
+      if (state.fileMulti) { toggleFileSel(name); return; }
       if (type === 'dir') listFiles(full);
       else if (type === 'file') openFile(full, name);
       else toast('暂不支持打开符号链接');
@@ -1121,13 +1187,13 @@ function renderFiles(list) {
   });
 }
 
-/* --- 复制 / 剪切 / 粘贴 --- */
-state.clipboard = null; // { mode: 'copy'|'cut', path, name, type, connId }
+/* --- 复制 / 剪切 / 粘贴（支持多项） --- */
+state.clipboard = null; // { mode: 'copy'|'cut', items: [{path, name, type}], connId }
 
 function setClipboard(mode, path, name, type) {
   const c = currentFileConn();
   if (!c) return;
-  state.clipboard = { mode, path, name, type, connId: c.connId };
+  state.clipboard = { mode, items: [{ path, name, type }], connId: c.connId };
   updatePasteBtn();
   renderFiles(state.fileList); // 刷新剪切高亮
   toast(`${mode === 'copy' ? '已复制' : '已剪切'}「${name}」，进入目标目录后点击顶部「粘贴」`, 'ok');
@@ -1142,8 +1208,9 @@ function updatePasteBtn() {
     clr.classList.add('hidden');
     return;
   }
-  btn.textContent = `${cb.mode === 'copy' ? '⧉' : '✂'} 粘贴「${cb.name}」`;
-  btn.title = `${cb.mode === 'copy' ? '复制' : '剪切'}自 ${cb.path}，点击粘贴到当前目录`;
+  const n = cb.items.length;
+  btn.textContent = `${cb.mode === 'copy' ? '⧉' : '✂'} 粘贴${n > 1 ? ` ${n} 项` : `「${cb.items[0].name}」`}`;
+  btn.title = `${cb.mode === 'copy' ? '复制' : '剪切'}自 ${cb.items[0].path}${n > 1 ? ` 等 ${n} 项` : ''}，点击粘贴到当前目录`;
   btn.classList.remove('hidden');
   clr.classList.remove('hidden');
 }
@@ -1151,31 +1218,132 @@ function updatePasteBtn() {
 function doPaste() {
   const cb = state.clipboard;
   const c = currentFileConn();
-  if (!cb || !c) return;
-  const dst = joinPath(state.filePath, cb.name);
-  if (dst === cb.path) { toast('已在原位置，无需粘贴', 'err'); return; }
-  if (dst.startsWith(cb.path + '/')) { toast('不能粘贴到自身内部', 'err'); return; }
-  const perform = (preDelete) => {
-    const run = () => {
-      toast(cb.mode === 'copy' ? '正在复制…' : '正在移动…');
-      sftpCall(cb.mode === 'cut' ? 'c:sftp:move' : 'c:sftp:copy', { path: cb.path, newPath: dst }, (res, err) => {
-        if (err) return;
+  if (!cb || !c || cb.connId !== c.connId || !cb.items.length) return;
+  const items = cb.items;
+  // 不能粘贴到自身内部（目录场景）
+  for (const it of items) {
+    const dst = joinPath(state.filePath, it.name);
+    if (dst === it.path) { toast(`「${it.name}」已在原位置，无需粘贴`, 'err'); return; }
+    if (it.type === 'dir' && dst.startsWith(it.path + '/')) { toast('不能粘贴到自身内部', 'err'); return; }
+  }
+  const run = () => {
+    toast(cb.mode === 'cut' ? '正在移动…' : '正在复制…');
+    let i = 0;
+    (function next() {
+      if (i >= items.length) {
         toast(cb.mode === 'cut' ? '已移动' : '已复制', 'ok');
         if (cb.mode === 'cut') { state.clipboard = null; updatePasteBtn(); }
         listFiles(state.filePath);
+        return;
+      }
+      const it = items[i++];
+      sftpCall(cb.mode === 'cut' ? 'c:sftp:move' : 'c:sftp:copy', { path: it.path, newPath: joinPath(state.filePath, it.name) }, (res, err) => {
+        if (err) { toast(`「${it.name}」处理失败，已中止后续操作`, 'err'); listFiles(state.filePath); return; }
+        next();
       });
-    };
-    if (preDelete) sftpCall('c:sftp:delete', { path: dst }, () => run());
-    else run();
+    })();
   };
   // 同名冲突检查
-  const exists = (state.fileList || []).some(f => f.name === cb.name);
-  if (exists) {
-    confirmDlg('覆盖确认', `当前目录已存在同名「${cb.name}」，覆盖后将删除原有${cb.type === 'dir' ? '目录（仅空目录可删）' : '文件'}，继续吗？`, () => perform(true));
+  const conflicts = items.filter(it => (state.fileList || []).some(f => f.name === it.name));
+  if (conflicts.length) {
+    const names = conflicts.map(it => it.name).join('、');
+    const tip = conflicts.length === 1 && conflicts[0].type === 'dir' ? '（目录仅空目录可删）' : '';
+    confirmDlg('覆盖确认', `当前目录已存在同名项目：${names}，覆盖后将删除原有项目${tip}，继续吗？`, () => {
+      // 先删除目标位置的同名项，再执行复制/移动
+      let j = 0;
+      (function delNext() {
+        if (j >= conflicts.length) return run();
+        const it = conflicts[j++];
+        sftpCall('c:sftp:delete', { path: joinPath(state.filePath, it.name) }, () => delNext());
+      })();
+    });
   } else {
-    perform(false);
+    run();
   }
 }
+
+/* --- 多选模式 --- */
+function toggleFileSel(name) {
+  if (state.fileSel.has(name)) state.fileSel.delete(name);
+  else state.fileSel.add(name);
+  updateBatchBar();
+  renderFiles(state.fileList);
+}
+
+function updateBatchBar() {
+  const bar = $('#fileBatchBar');
+  if (!bar) return;
+  if (!state.fileMulti) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  const n = state.fileSel.size;
+  $('#batchCount').textContent = n ? `已选 ${n} 项` : '点击文件行进行选择';
+  ['btnBatchCopy', 'btnBatchCut', 'btnBatchCompress'].forEach(id => { $('#' + id).disabled = !n; });
+  const total = (state.fileList || []).length;
+  $('#btnSelAll').textContent = n && n === total ? '全不选' : '全选';
+}
+
+function exitMulti() {
+  state.fileMulti = false;
+  state.fileSel.clear();
+  $('#btnMulti').classList.remove('active');
+  updateBatchBar();
+  renderFiles(state.fileList);
+}
+
+$('#btnMulti').addEventListener('click', () => {
+  state.fileMulti = !state.fileMulti;
+  state.fileSel.clear();
+  $('#btnMulti').classList.toggle('active', state.fileMulti);
+  updateBatchBar();
+  renderFiles(state.fileList);
+});
+
+$('#btnMultiExit').addEventListener('click', exitMulti);
+
+$('#btnSelAll').addEventListener('click', () => {
+  const list = state.fileList || [];
+  if (state.fileSel.size && state.fileSel.size === list.length) state.fileSel.clear();
+  else list.forEach(f => state.fileSel.add(f.name));
+  updateBatchBar();
+  renderFiles(state.fileList);
+});
+
+// 批量复制 / 剪切：加入剪贴板（多项）
+function batchClipboard(mode) {
+  const c = currentFileConn();
+  if (!c || !state.fileSel.size) return;
+  const items = (state.fileList || []).filter(f => state.fileSel.has(f.name))
+    .map(f => ({ name: f.name, path: joinPath(state.filePath, f.name), type: f.type }));
+  if (!items.length) return;
+  state.clipboard = { mode, items, connId: c.connId };
+  updatePasteBtn();
+  exitMulti();
+  toast(`已${mode === 'copy' ? '复制' : '剪切'} ${items.length} 项，进入目标目录后点击顶部「粘贴」`, 'ok');
+}
+$('#btnBatchCopy').addEventListener('click', () => batchClipboard('copy'));
+$('#btnBatchCut').addEventListener('click', () => batchClipboard('cut'));
+
+// 批量压缩：远端 tar 打包为 .tar.gz
+$('#btnBatchCompress').addEventListener('click', () => {
+  if (!currentFileConn()) { toast('请先连接主机', 'err'); return; }
+  const names = [...state.fileSel];
+  if (!names.length) return;
+  const ts = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const def = `archive_${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.tar.gz`;
+  inputDlg('压缩', '压缩包文件名（tar.gz）', def, v => {
+    let name = (v || '').trim();
+    if (!name) return;
+    if (!/\.tar\.gz$/.test(name)) name += '.tar.gz';
+    if ((state.fileList || []).some(f => f.name === name)) { toast('当前目录已存在同名压缩包', 'err'); return; }
+    toast('正在压缩，文件较多时可能需要一些时间…');
+    sftpCall('c:sftp:compress', { dir: state.filePath, names, out: name }, () => {
+      toast('压缩完成：' + name, 'ok');
+      exitMulti();
+      listFiles(state.filePath);
+    });
+  });
+});
 
 $('#btnPaste').addEventListener('click', doPaste);
 $('#btnPasteClear').addEventListener('click', () => {

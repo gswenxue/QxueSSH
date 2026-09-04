@@ -92,11 +92,20 @@
             <div class="panel-actions">
               <button class="btn btn-sm btn-primary hidden" id="btnPaste" title="粘贴到当前目录">粘贴</button>
               <button class="btn btn-sm btn-ghost hidden" id="btnPasteClear" title="取消复制/剪切">✕</button>
+              <button class="btn btn-sm btn-ghost" id="btnMulti" title="多选模式：批量复制/剪切/压缩">☑多选</button>
               <button class="btn btn-sm btn-ghost" id="btnUpload" title="上传文件">↑上传</button>
               <button class="btn btn-sm btn-ghost" id="btnNewFolder">+目录</button>
               <button class="btn btn-sm btn-ghost" id="btnNewFile">+文件</button>
               <button class="btn btn-sm btn-ghost" id="btnRefreshFiles">↻</button>
             </div>
+          </div>
+          <div id="fileBatchBar" class="batch-bar hidden">
+            <span id="batchCount" class="batch-count">点击文件行进行选择</span>
+            <button class="btn btn-sm" id="btnBatchCopy" title="批量复制选中项">⧉ 复制</button>
+            <button class="btn btn-sm" id="btnBatchCut" title="批量剪切选中项">✂ 剪切</button>
+            <button class="btn btn-sm" id="btnBatchCompress" title="打包为 tar.gz">📦 压缩</button>
+            <button class="btn btn-sm btn-ghost" id="btnSelAll">全选</button>
+            <button class="btn btn-sm btn-ghost" id="btnMultiExit">退出多选</button>
           </div>
           <div id="fileBreadcrumb" class="breadcrumb"></div>
           <div class="panel-body">

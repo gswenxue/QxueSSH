@@ -402,6 +402,22 @@ app_.delete('/hosts/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// 主机排序：在当前用户的主机列表内上移/下移一位
+app_.put('/hosts/:id/move', requireAuth, (req, res) => {
+  const dir = (req.body || {}).dir;
+  if (dir !== 'up' && dir !== 'down') return res.status(400).json({ error: '参数错误' });
+  // 该用户的主机在 db.hosts 中的索引（保持相对顺序）
+  const mine = db.hosts.map((h, i) => ({ h, i })).filter(x => x.h.userId === req.user.id);
+  const pos = mine.findIndex(x => x.h.id === req.params.id);
+  if (pos < 0) return res.status(404).json({ error: '主机不存在' });
+  const target = dir === 'up' ? pos - 1 : pos + 1;
+  if (target < 0 || target >= mine.length) return res.status(400).json({ error: '已在边缘位置' });
+  const a = mine[pos].i, b = mine[target].i;
+  [db.hosts[a], db.hosts[b]] = [db.hosts[b], db.hosts[a]];
+  saveDB();
+  res.json({ ok: true });
+});
+
 /* --------- 自定义快捷键 CRUD（需登录） --------- */
 function keyPublic(k) {
   return { id: k.id, label: k.label, keys: k.keys, data: k.data, createdAt: k.createdAt };
@@ -1027,16 +1043,32 @@ io.on('connection', (socket) => {
   });
 
   /* --- Docker 容器管理 --- */
-  // 在 SSH 会话上执行命令并收集输出
+  // 在 SSH 会话上执行命令并收集输出（cb: err, stdout, stderr, exitCode）
   function sshExec(s, cmd, cb) {
     s.client.exec(cmd, (err, stream) => {
       if (err) return cb(err.message);
-      let out = '', errOut = '';
+      let out = '', errOut = '', code = 0;
       stream.on('data', d => out += d.toString());
       stream.stderr.on('data', d => errOut += d.toString());
-      stream.on('close', () => cb(null, out, errOut));
+      stream.on('exit', c => { code = c; });
+      stream.on('close', () => cb(null, out, errOut, code));
     });
   }
+
+  // 压缩：将 dir 下选中的多个文件/目录打包为 tar.gz
+  socket.on('c:sftp:compress', ({ connId, dir, names, out } = {}, ack) => {
+    const s = getSession(connId);
+    if (!s) return ack && ack({ error: '连接不存在' });
+    if (!Array.isArray(names) || !names.length || !dir || !out) return ack && ack({ error: '参数错误' });
+    // shell 单引号转义，防止路径/文件名中特殊字符注入
+    const esc = v => "'" + String(v).replace(/'/g, "'\\''") + "'";
+    const cmd = `cd ${esc(dir)} && tar -czf ${esc(out)} -- ${names.map(esc).join(' ')}`;
+    sshExec(s, cmd, (err, stdout, stderr, code) => {
+      if (err) return ack && ack({ error: err });
+      if (code !== 0) return ack && ack({ error: (stderr || '').trim().split('\n')[0] || '压缩失败' });
+      ack && ack({ ok: true });
+    });
+  });
 
   // 防命令注入：容器名/ID 只允许安全字符
   function safeName(name) {
