@@ -50,15 +50,16 @@ detect_os
 install_deps() {
   # node-pty 原生模块编译需要 python3 + g++ + make；Node.js 包需要 xz 解压
   if command -v apt-get &>/dev/null; then
-    info "安装基础依赖（xz-utils build-essential python3）..."
+    info "安装基础依赖（xz-utils g++ make python3）..."
     apt-get update -qq 2>/dev/null
-    # 分开安装：xz-utils 必需优先，编译工具可选（node-pty 有预编译二进制）
+    # 分开安装：xz-utils 必需优先，编译工具可选
     apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
-    apt-get install -y -qq build-essential python3 >/dev/null 2>&1 || apt-get install -y -qq g++ make python3 >/dev/null 2>&1 || true
-    if command -v xz &>/dev/null; then ok "基础依赖安装完成"; return; fi
+    apt-get install -y -qq g++ make python3 >/dev/null 2>&1 || true
+    if command -v xz &>/dev/null && command -v g++ &>/dev/null; then ok "基础依赖安装完成"; return; fi
+
     # fallback: Debian/Ubuntu 旧版本(EOL)源404时，临时换 archive 源
-    warn "默认源安装失败，尝试归档源..."
     if [ -f /etc/apt/sources.list ] && grep -qE "deb\.debian\.org|archive\.ubuntu\.com" /etc/apt/sources.list; then
+      warn "默认源安装失败，尝试归档源..."
       local CODENAME="$(grep -oP 'VERSION_CODENAME=\K\w+' /etc/os-release 2>/dev/null || echo bullseye)"
       cp /etc/apt/sources.list /etc/apt/sources.list.qxuebak 2>/dev/null
       cat > /etc/apt/sources.list <<APTEOF
@@ -66,8 +67,12 @@ deb http://archive.debian.org/debian ${CODENAME} main contrib
 APTEOF
       apt-get update -o Acquire::Check-Valid-Until=false -qq 2>/dev/null
       apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
-      apt-get install -y -qq make python3 >/dev/null 2>&1 || true
-      apt-get install -y -qq g++ >/dev/null 2>&1 || true
+      # g++ 可能因 libc6-dev 版本不匹配失败，尝试允许降级 dev 包
+      if ! apt-get install -y -qq g++ make python3 >/dev/null 2>&1; then
+        warn "编译工具版本冲突，尝试降级 libc6-dev..."
+        apt-get install -y -qq --allow-downgrades libc6-dev >/dev/null 2>&1 || true
+        apt-get install -y -qq g++ make python3 >/dev/null 2>&1 || true
+      fi
       [ -f /etc/apt/sources.list.qxuebak ] && mv /etc/apt/sources.list.qxuebak /etc/apt/sources.list
     fi
   elif command -v yum &>/dev/null; then
@@ -82,10 +87,13 @@ APTEOF
   else
     warn "未识别的包管理器，请确保已安装 xz、g++、make、python3"
   fi
-  # 最终验证 xz 是否可用（解压 Node.js 必需）
+  # 最终验证：xz 必需，g++ 缺失时警告（本机终端不可用但SSH功能正常）
   if ! command -v xz &>/dev/null; then
     err "xz 解压工具安装失败，无法继续。请手动安装 xz-utils 后重试。"
     exit 1
+  fi
+  if ! command -v g++ &>/dev/null; then
+    warn "g++ 未安装，本机终端功能将不可用（SSH连接功能正常）"
   fi
   ok "基础依赖检查完成"
 }
