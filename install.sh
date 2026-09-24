@@ -364,18 +364,31 @@ SVCEOF
 #!/sbin/openrc-run
 
 description="QxueSSH Web SSH Client"
-command="$NODE_BIN"
-command_args="server.js"
-command_background="yes"
-directory="$INSTALL_DIR"
-pidfile="/run/\${RC_SVCNAME}.pid"
-env PORT="$APP_PORT"
-output_log="/var/log/qxuessh.log"
-error_log="/var/log/qxuessh.log"
+pidfile="/run/qxuessh.pid"
+logfile="/var/log/qxuessh.log"
 
 depend() {
     need net
     after firewall
+}
+
+start() {
+    ebegin "Starting QxueSSH"
+    cd $INSTALL_DIR
+    PORT=$APP_PORT nohup $NODE_BIN server.js > \$logfile 2>&1 &
+    echo \$! > \$pidfile
+    eend \$?
+}
+
+stop() {
+    ebegin "Stopping QxueSSH"
+    if [ -f \$pidfile ]; then
+        kill \$(cat \$pidfile) 2>/dev/null
+        rm -f \$pidfile
+    else
+        pkill -f "node server.js" 2>/dev/null
+    fi
+    eend \$?
 }
 SVCEOF
     chmod +x /etc/init.d/${SERVICE_NAME}
