@@ -175,6 +175,19 @@ download_project
 # ---------- 安装依赖 ----------
 cd "$INSTALL_DIR"
 info "安装 npm 依赖..."
+
+# 低内存机器自动创建 swap，防止编译 node-pty 时 OOM
+MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+if [ -n "$MEM_TOTAL_KB" ] && [ "$MEM_TOTAL_KB" -lt 1048576 ]; then
+  if [ ! -f /tmp/qxue_swap ]; then
+    warn "内存不足 1GB，自动创建 1GB swap 以支持编译..."
+    fallocate -l 1G /tmp/qxue_swap 2>/dev/null || dd if=/dev/zero of=/tmp/qxue_swap bs=1M count=1024 2>/dev/null
+    chmod 600 /tmp/qxue_swap
+    mkswap /tmp/qxue_swap >/dev/null 2>&1
+    swapon /tmp/qxue_swap 2>/dev/null && info "swap 已启用" || warn "swap 创建失败，编译可能因内存不足失败"
+  fi
+fi
+
 npm install --production --registry=https://registry.npmmirror.com 2>/dev/null || npm install --production
 ok "依赖安装完成"
 
