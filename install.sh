@@ -227,7 +227,7 @@ if [ "$PREBUILT_AVAILABLE" = "1" ]; then
   PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}.tar.gz"
   [ "$PREBUILT_LIBC" = "musl" ] && PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}-musl.tar.gz"
   PREBUILT_URL="https://github.com/gswenxue/QxueSSH/releases/download/prebuilt-v1/${PREBUILT_PKG}"
-  info "尝试下载预编译 node_modules（linux-${PREBUILT_ARCH}）..."
+  info "尝试下载预编译 node_modules（${PREBUILT_PKG}）..."
   if curl -sL --fail "$PREBUILT_URL" -o /tmp/qxue_node_modules.tar.gz 2>/dev/null && [ -s /tmp/qxue_node_modules.tar.gz ]; then
     tar -xzf /tmp/qxue_node_modules.tar.gz -C "$INSTALL_DIR"
     rm -f /tmp/qxue_node_modules.tar.gz
