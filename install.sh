@@ -420,8 +420,16 @@ info "启动 QxueSSH 服务..."
 create_service
 case "$SERVICE_TYPE" in
   systemd) systemctl start $SERVICE_NAME ;;
-  openrc)  rc-service $SERVICE_NAME start ;;
-  *)       cd "$INSTALL_DIR" && PORT=$APP_PORT nohup $NODE_BIN server.js > /tmp/qxuessh.log 2>&1 & ;;
+  openrc)
+    # OpenRC 启动（带超时，容器环境可能卡住则回退 nohup）
+    if timeout 10 rc-service $SERVICE_NAME start 2>/dev/null; then
+      sleep 1
+    else
+      warn "OpenRC 启动超时，回退到 nohup 方式"
+      cd "$INSTALL_DIR" && PORT=$APP_PORT nohup $NODE_BIN server.js > /var/log/qxuessh.log 2>&1 &
+    fi
+    ;;
+  *) cd "$INSTALL_DIR" && PORT=$APP_PORT nohup $NODE_BIN server.js > /tmp/qxuessh.log 2>&1 & ;;
 esac
 
 sleep 2
