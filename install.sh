@@ -51,10 +51,11 @@ install_deps() {
   # node-pty 原生模块编译需要 python3 + g++ + make；Node.js 包需要 xz 解压
   if command -v apt-get &>/dev/null; then
     info "安装基础依赖（xz-utils build-essential python3）..."
-    if apt-get update -qq && apt-get install -y -qq xz-utils build-essential python3 >/dev/null 2>&1; then
-      ok "基础依赖安装完成"
-      return
-    fi
+    apt-get update -qq 2>/dev/null
+    # 分开安装：xz-utils 必需优先，编译工具可选（node-pty 有预编译二进制）
+    apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
+    apt-get install -y -qq build-essential python3 >/dev/null 2>&1 || apt-get install -y -qq g++ make python3 >/dev/null 2>&1 || true
+    if command -v xz &>/dev/null; then ok "基础依赖安装完成"; return; fi
     # fallback: Debian/Ubuntu 旧版本(EOL)源404时，临时换 archive 源
     warn "默认源安装失败，尝试归档源..."
     if [ -f /etc/apt/sources.list ] && grep -qE "deb\.debian\.org|archive\.ubuntu\.com" /etc/apt/sources.list; then
@@ -64,8 +65,9 @@ install_deps() {
 deb http://archive.debian.org/debian ${CODENAME} main contrib
 APTEOF
       apt-get update -o Acquire::Check-Valid-Until=false -qq 2>/dev/null
-      apt-get install -y -qq xz-utils build-essential python3 >/dev/null 2>&1 || true
-      # 恢复原源
+      apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
+      apt-get install -y -qq make python3 >/dev/null 2>&1 || true
+      apt-get install -y -qq g++ >/dev/null 2>&1 || true
       [ -f /etc/apt/sources.list.qxuebak ] && mv /etc/apt/sources.list.qxuebak /etc/apt/sources.list
     fi
   elif command -v yum &>/dev/null; then
