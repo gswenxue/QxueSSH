@@ -58,13 +58,16 @@
 
 ### 一键部署（推荐）
 
-在服务器上执行以下命令，脚本会自动下载固定版本 Node.js（v20.18.1，独立安装到 `/opt/qxue-node/`，不依赖系统预装）、下载项目、配置管理员账号和端口，并注册为 systemd 服务：
+在服务器上执行以下命令，脚本会自动安装 Node.js 环境、下载项目、配置管理员账号和端口，并注册为 systemd 服务：
+
+- **Debian/Ubuntu/CentOS（glibc）**：下载固定版本 Node.js v20.18.1，独立安装到 `/opt/qxue-node/`，不依赖系统预装
+- **Alpine（musl）**：通过 `apk` 安装仓库版 Node.js（v20.x），官方二进制不兼容 musl
 
 ```bash
 curl -O https://raw.githubusercontent.com/gswenxue/QxueSSH/main/install.sh && bash install.sh
 ```
 
-**预编译加速**：Debian/Ubuntu/CentOS（glibc）和 Alpine（musl）的 x86_64 / arm64 系统自动下载预编译的 `node_modules`（含 node-pty 原生二进制），跳过本地编译，安装仅需 20-40 秒。其他架构自动回退到本地编译。
+**预编译加速**：Debian/Ubuntu/CentOS（glibc）和 Alpine（musl）的 **x86_64** 系统自动下载预编译的 `node_modules`（含 node-pty 原生二进制），跳过本地编译，安装仅需 20-40 秒。arm64 及其他架构自动回退到本地编译（需安装编译工具）。
 
 > **Alpine 注意**：Alpine 使用 musl libc，官方 Node.js 二进制不兼容，脚本会自动通过 `apk` 安装仓库版 Node.js（v20.x），并下载 musl 版本的预编译 node_modules。
 
@@ -98,7 +101,7 @@ qxuessh
 | 9 | 卸载服务 |
 | 0 | 退出 |
 
-**卸载服务**：停止并删除服务，询问是否保留 Node.js 运行环境（`/opt/qxue-node/`）。选 `y` 仅删除项目文件，保留环境便于下次快速重装；选 `n` 彻底删除项目、Node.js 环境和管理命令。
+**卸载服务**：停止并删除服务，询问是否保留 Node.js 运行环境（glibc 系统为 `/opt/qxue-node/`）。选 `y` 仅删除项目文件，保留环境便于下次快速重装；选 `n` 彻底删除项目、Node.js 环境和管理命令。
 
 也支持直接命令模式：`qxuessh status`、`qxuessh restart`、`qxuessh port 8080`、`qxuessh autostart on` 等。
 
@@ -134,6 +137,26 @@ PORT=8080 node server.js
 
 - 一键部署脚本已自动配置 systemd 常驻运行与开机自启动
 - 建议用 Nginx / Caddy 反向代理并配置 HTTPS（设置中可开启"信任代理头"获取真实 IP）
+
+### 更新到最新版本
+
+```bash
+# 进入项目目录
+cd /opt/QxueSSH
+
+# 拉取最新代码
+git pull
+
+# 重新安装依赖（如有依赖变更）
+npm install --production
+
+# 重启服务
+qxuessh restart
+# 或
+systemctl restart qxuessh
+```
+
+> 如果使用了预编译 node_modules，更新后建议重新下载对应平台的预编译包以确保原生模块兼容。
 
 ## 配置说明
 
