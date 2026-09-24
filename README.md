@@ -135,7 +135,10 @@ PORT=8080 node server.js
 
 ### 生产环境建议
 
-- 一键部署脚本已自动配置 systemd 常驻运行与开机自启动
+- 一键部署脚本已自动配置服务常驻运行与开机自启动
+  - Debian/Ubuntu/CentOS：systemd 服务
+  - Alpine/Gentoo：OpenRC 服务（`/etc/init.d/qxuessh`）
+  - 无 init 系统的环境：nohup 后台运行
 - 建议用 Nginx / Caddy 反向代理并配置 HTTPS（设置中可开启"信任代理头"获取真实 IP）
 
 ### 更新到最新版本
