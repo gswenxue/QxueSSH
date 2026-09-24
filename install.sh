@@ -331,6 +331,7 @@ ok "管理员账号已创建"
 
 # ---------- 创建 systemd 服务 ----------
 create_service() {
+  SERVICE_TYPE="nohup"
   # systemd (Debian/Ubuntu/CentOS)
   if command -v systemctl &>/dev/null; then
     cat > /etc/systemd/system/${SERVICE_NAME}.service <<SVCEOF
@@ -353,7 +354,7 @@ SVCEOF
     systemctl daemon-reload
     systemctl enable ${SERVICE_NAME} &>/dev/null
     ok "systemd 服务已创建并设置自启动"
-    echo "systemd"
+    SERVICE_TYPE="systemd"
     return 0
   fi
 
@@ -380,12 +381,11 @@ SVCEOF
     chmod +x /etc/init.d/${SERVICE_NAME}
     rc-update add ${SERVICE_NAME} default &>/dev/null
     ok "OpenRC 服务已创建并设置自启动"
-    echo "openrc"
+    SERVICE_TYPE="openrc"
     return 0
   fi
 
   warn "未检测到 systemd 或 OpenRC，将使用 nohup 方式运行"
-  echo "nohup"
   return 1
 }
 
@@ -404,7 +404,7 @@ create_cli
 # ---------- 启动服务 ----------
 echo ""
 info "启动 QxueSSH 服务..."
-SERVICE_TYPE=$(create_service)
+create_service
 case "$SERVICE_TYPE" in
   systemd) systemctl start $SERVICE_NAME ;;
   openrc)  rc-service $SERVICE_NAME start ;;
