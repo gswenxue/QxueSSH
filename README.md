@@ -23,8 +23,16 @@
 
 ### 实时系统监控
 - CPU、内存、**Swap**（未启用会明确显示）、磁盘、网络速率
+- **系统版本**（如 Debian 11、Ubuntu 22.04 等，顶部展示）
 - 负载、运行时长、进程 TOP
 - 底部状态条实时展示，间隔可调
+- 兼容 Alpine 等 BusyBox 系统（磁盘检测自动适配）
+
+### 本机终端
+- 管理员可在站点管理中开启「本机终端」，开启需验证本机 SSH 密码或私钥
+- 开启后仅管理员主页可见，直接访问部署机器本身的 shell，无需 SSH 连接
+- 支持完整交互式终端（vim、top、htop 等），监控面板同步展示本机信息
+- 统一终端环境（TERM/COLORTERM/LANG），字体颜色与 SSH 登录体验一致
 
 ### Docker 容器管理
 - 服务器 Docker 版本、镜像存储位置
@@ -41,17 +49,22 @@
 - 未登录禁止使用 SSH 功能，防止被滥用
 - 前端资源**完全自托管**（xterm.js、图标等内置，无外部 CDN 请求），杜绝第三方脚本窃取 SSH 凭据的供应链风险
 - 管理员可开关站点注册、查看登录日志
+- 管理员可开关「本机终端」（开启需验证本机 SSH 凭据，开启后仅管理员可见可用）
+- 管理员账号无注销按键，避免异常操作
+- 退出登录时自动关闭所有已打开的终端会话，防止残留
 - WebDAV 自动备份（如坚果云）
 
 ## 部署
 
 ### 一键部署（推荐）
 
-在服务器上执行以下命令，脚本会自动安装 Node.js 环境、下载项目、配置管理员账号和端口，并注册为 systemd 服务：
+在服务器上执行以下命令，脚本会自动下载固定版本 Node.js（v20.18.1，独立安装到 `/opt/qxue-node/`，不依赖系统预装）、下载项目、配置管理员账号和端口，并注册为 systemd 服务：
 
 ```bash
 curl -O https://raw.githubusercontent.com/gswenxue/QxueSSH/main/install.sh && bash install.sh
 ```
+
+**预编译加速**：Debian/Ubuntu（glibc）x86_64 / arm64 系统自动下载预编译的 `node_modules`（含 node-pty 原生二进制），跳过本地编译，安装仅需 20-40 秒。Alpine（musl）及其他架构自动回退到本地编译。
 
 部署过程中会交互式询问：
 - 管理员用户名（默认 `Qxue`）
@@ -80,7 +93,10 @@ qxuessh
 | 6 | 重置管理员密码 |
 | 7 | 查看运行日志 |
 | 8 | 查看服务详情 |
+| 9 | 卸载服务 |
 | 0 | 退出 |
+
+**卸载服务**：停止并删除服务，询问是否保留 Node.js 运行环境（`/opt/qxue-node/`）。选 `y` 仅删除项目文件，保留环境便于下次快速重装；选 `n` 彻底删除项目、Node.js 环境和管理命令。
 
 也支持直接命令模式：`qxuessh status`、`qxuessh restart`、`qxuessh port 8080`、`qxuessh autostart on` 等。
 
@@ -127,10 +143,21 @@ PORT=8080 node server.js
 
 ## 技术栈
 
-- 后端：Node.js + Express + Socket.IO + ssh2
+- 后端：Node.js + Express + Socket.IO + ssh2 + node-pty（本机终端）
 - 前端：原生 JavaScript + xterm.js（自托管于 `public/vendor/`）
 - 认证：bcryptjs + Token（3 天有效期，滑动续期）
 - 静态资源：预压缩传输（`.gz` 预生成，零运行时压缩开销）
+
+## 系统要求
+
+| 项目 | 最低配置 | 推荐配置 |
+|------|---------|---------|
+| CPU | 1 核 | 2 核+ |
+| 内存 | 512MB（预编译模式） | 1GB+ |
+| 磁盘 | 200MB | 500MB+ |
+| 系统 | Debian 10+ / Ubuntu 18.04+ / CentOS 7+ / Alpine | Debian/Ubuntu LTS |
+
+> 预编译模式下无需编译工具，低内存机器也可流畅安装；Alpine 等 musl 系统需本地编译，建议 1GB+ 内存。
 
 ## 二次开发注意
 
