@@ -66,56 +66,25 @@ viswidth() {
   echo $w
 }
 
-# ---------- 菜单绘制（动态边框，确保所有框宽度一致） ----------
-MENU_WIDTH=38  # 内容区宽度（不含两侧║）
-
-# 生成指定字符重复n次
-repeat_char() {
-  local char="$1" count="$2" i
-  local result=""
-  for ((i=0; i<count; i++)); do result="${result}${char}"; done
-  echo -n "$result"
-}
-
-# 顶边 ╔═══╗
-top_border() { echo -e "${BOLD}${BLUE}╔$(repeat_char "═" $MENU_WIDTH)╗${NC}"; }
-# 分隔线 ╠═══╣
-mid_border() { echo -e "${BOLD}${BLUE}╠$(repeat_char "═" $MENU_WIDTH)╣${NC}"; }
-# 底边 ╚═══╝
-bot_border() { echo -e "${BOLD}${BLUE}╚$(repeat_char "═" $MENU_WIDTH)╝${NC}"; }
-
-# 输出一行菜单内容，自动补空格到统一宽度
-menuline() {
-  local content="$1"
-  local vw=$(viswidth "$content")
-  local pad=$((MENU_WIDTH - vw))
-  [ $pad -lt 0 ] && pad=0
-  printf "${BOLD}${BLUE}║${NC}%s%*s${BOLD}${BLUE}║${NC}\n" "$content" "$pad" ""
-}
-
+# ---------- 菜单绘制（简洁样式，无框线） ----------
 draw_menu() {
   refresh_status
   clear 2>/dev/null || printf '\033[2J\033[H'
   echo ""
-  top_border
-  menuline "     ${BOLD}QxueSSH 服务管理${NC}"
-  mid_border
-  menuline "  状态: $STATUS_TEXT"
-  menuline "  端口: ${CYAN}$PORT${NC}"
-  menuline "  自启: $AUTOSTART_TEXT"
-  mid_border
-  menuline "  ${DIM}1${NC}. 重启服务"
-  menuline "  ${DIM}2${NC}. 停止服务"
-  menuline "  ${DIM}3${NC}. 启动服务"
-  menuline "  ${DIM}4${NC}. 修改运行端口"
-  menuline "  ${DIM}5${NC}. 开机自启动管理"
-  menuline "  ${DIM}6${NC}. 重置管理员密码"
-  menuline "  ${DIM}7${NC}. 查看运行日志"
-  menuline "  ${DIM}8${NC}. 查看服务详情"
-  menuline "  ${DIM}9${NC}. 卸载服务"
-  mid_border
-  menuline "  ${DIM}0${NC}. 退出"
-  bot_border
+  echo -e "${BOLD}${BLUE}===== QxueSSH 服务管理 =====${NC}"
+  echo -e "  状态: $STATUS_TEXT   端口: ${CYAN}$PORT${NC}   自启: $AUTOSTART_TEXT"
+  echo -e "${BLUE}----------------------------${NC}"
+  echo -e "  ${DIM}1${NC}. 重启服务"
+  echo -e "  ${DIM}2${NC}. 停止服务"
+  echo -e "  ${DIM}3${NC}. 启动服务"
+  echo -e "  ${DIM}4${NC}. 修改运行端口"
+  echo -e "  ${DIM}5${NC}. 开机自启动管理"
+  echo -e "  ${DIM}6${NC}. 重置管理员密码"
+  echo -e "  ${DIM}7${NC}. 查看运行日志"
+  echo -e "  ${DIM}8${NC}. 查看服务详情"
+  echo -e "  ${DIM}9${NC}. 卸载服务"
+  echo -e "${BLUE}----------------------------${NC}"
+  echo -e "  ${DIM}0${NC}. 退出"
   echo ""
 }
 
