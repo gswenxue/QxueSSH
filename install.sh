@@ -134,12 +134,27 @@ APTEOF
 }
 install_deps
 
-# ---------- 安装 Node.js（固定版本，独立目录，不依赖系统预装） ----------
+# ---------- 安装 Node.js ----------
+# glibc 系统：下载固定版本 v20.18.1 到 /opt/qxue-node/（独立目录，不依赖系统预装）
+# musl(Alpine) 系统：官方二进制不兼容 musl，通过 apk 安装仓库版 nodejs
 NODE_DIR="/opt/qxue-node"
 NODE_BIN="$NODE_DIR/bin/node"
 
 install_node() {
-  # 如果已安装正确版本则跳过
+  # Alpine(musl) 通过 apk 安装原生 nodejs
+  if [ "$PREBUILT_LIBC" = "musl" ]; then
+    if command -v node &>/dev/null && [ "$(node -v | cut -d. -f1 | tr -d 'v')" -ge 18 ]; then
+      ok "Node.js $(node -v) 已安装（apk 仓库版）"
+    else
+      info "Alpine 系统通过 apk 安装 Node.js..."
+      apk add --no-cache nodejs npm >/dev/null 2>&1 || { err "Node.js 安装失败"; exit 1; }
+      ok "Node.js $(node -v) / npm $(npm -v) 安装完成（apk 仓库版）"
+    fi
+    NODE_BIN=$(which node)
+    return
+  fi
+
+  # glibc 系统：下载固定版本到独立目录
   if [ -x "$NODE_BIN" ] && "$NODE_BIN" -v 2>/dev/null | grep -q "$NODE_VERSION"; then
     ok "Node.js $NODE_VERSION 已安装（$NODE_DIR）"
     return
