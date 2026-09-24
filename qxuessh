@@ -6,14 +6,16 @@
 # ============================================================
 
 INSTALL_DIR="/opt/QxueSSH"
+NODE_DIR="/opt/qxue-node"
 SERVICE_NAME="qxuessh"
 DB_FILE="$INSTALL_DIR/data/db.json"
 
 # 确保终端环境可用
 export TERM=xterm-256color
 
-# 动态获取 node 路径（兼容系统预装 / 手动安装等不同位置）
-NODE_BIN=$(which node 2>/dev/null || echo "$NODE_BIN")
+# 固定使用脚本安装的 Node.js（独立目录，不依赖系统预装）
+NODE_BIN="$NODE_DIR/bin/node"
+[ ! -x "$NODE_BIN" ] && NODE_BIN=$(which node 2>/dev/null || echo "node")
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 CYAN=$'\033[0;36m'; BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; NC=$'\033[0m'
@@ -110,6 +112,7 @@ draw_menu() {
   menuline "  ${DIM}6${NC}. 重置管理员密码"
   menuline "  ${DIM}7${NC}. 查看运行日志"
   menuline "  ${DIM}8${NC}. 查看服务详情"
+  menuline "  ${DIM}9${NC}. 卸载服务"
   mid_border
   menuline "  ${DIM}0${NC}. 退出"
   bot_border
@@ -263,6 +266,55 @@ do_detail() {
   pause
 }
 
+do_uninstall() {
+  echo ""
+  echo -e "${RED}⚠ 卸载 QxueSSH${NC}"
+  echo -e "${DIM}将停止服务并删除项目文件${NC}"
+  echo ""
+  read -rp "确认卸载？(y/N): " CONFIRM
+  [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ] && { echo -e "${YELLOW}已取消${NC}"; pause; return; }
+
+  echo -e "${CYAN}正在停止服务...${NC}"
+  systemctl stop $SERVICE_NAME 2>/dev/null
+  systemctl disable $SERVICE_NAME 2>/dev/null
+  pkill -f "node server.js" 2>/dev/null
+
+  echo ""
+  read -rp "是否保留 Node.js 运行环境（$NODE_DIR）？(y/N) " KEEP_NODE
+  if [ "$KEEP_NODE" = "y" ] || [ "$KEEP_NODE" = "Y" ]; then
+    echo -e "${DIM}保留 Node.js 环境: $NODE_DIR${NC}"
+    KEEP=1
+  else
+    echo -e "${CYAN}删除 Node.js 环境: $NODE_DIR${NC}"
+    rm -rf "$NODE_DIR"
+    KEEP=0
+  fi
+
+  echo -e "${CYAN}删除项目文件: $INSTALL_DIR${NC}"
+  rm -rf "$INSTALL_DIR"
+
+  echo -e "${CYAN}删除 systemd 服务...${NC}"
+  rm -f /etc/systemd/system/${SERVICE_NAME}.service
+  systemctl daemon-reload 2>/dev/null
+
+  if [ "$KEEP" = "0" ]; then
+    echo -e "${CYAN}删除管理命令: /usr/local/bin/qxuessh${NC}"
+    rm -f /usr/local/bin/qxuessh
+  fi
+
+  # 清理临时 swap
+  [ -f /tmp/qxue_swap ] && swapoff /tmp/qxue_swap 2>/dev/null && rm -f /tmp/qxue_swap
+
+  echo ""
+  echo -e "${GREEN}✓ QxueSSH 已卸载${NC}"
+  if [ "$KEEP" = "1" ]; then
+    echo -e "${DIM}Node.js 环境已保留，重新安装时可跳过下载${NC}"
+    echo -e "${DIM}管理命令 qxuessh 仍可用（重新安装后可继续使用）${NC}"
+  fi
+  echo ""
+  exit 0
+}
+
 # ---------- 直接命令模式（兼容旧用法） ----------
 cmd_mode() {
   case "$1" in
@@ -322,7 +374,7 @@ fi
 # 交互式菜单循环
 while true; do
   draw_menu
-  read -rp "请输入序号 [0-8]: " choice
+  read -rp "请输入序号 [0-9]: " choice
   case "$choice" in
     1) do_restart ;;
     2) do_stop ;;
@@ -332,6 +384,7 @@ while true; do
     6) do_resetpass ;;
     7) do_logs ;;
     8) do_detail ;;
+    9) do_uninstall ;;
     0|q|Q)
       clear 2>/dev/null || true
       echo -e "${GREEN}已退出 QxueSSH 管理菜单${NC}"

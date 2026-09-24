@@ -128,22 +128,17 @@ APTEOF
 }
 install_deps
 
-# ---------- 安装 Node.js ----------
+# ---------- 安装 Node.js（固定版本，独立目录，不依赖系统预装） ----------
+NODE_DIR="/opt/qxue-node"
+NODE_BIN="$NODE_DIR/bin/node"
+
 install_node() {
-  if command -v node &>/dev/null; then
-    NODE_VER=$(node -v)
-    NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1 | tr -d 'v')
-    if [ "$NODE_MAJOR" -ge 18 ]; then
-      ok "Node.js $NODE_VER 已安装（满足 18+ 要求）"
-      return
-    else
-      warn "Node.js $NODE_VER 版本过低，需要 18+，正在安装..."
-    fi
-  else
-    info "未检测到 Node.js，正在安装..."
+  # 如果已安装正确版本则跳过
+  if [ -x "$NODE_BIN" ] && "$NODE_BIN" -v 2>/dev/null | grep -q "$NODE_VERSION"; then
+    ok "Node.js $NODE_VERSION 已安装（$NODE_DIR）"
+    return
   fi
 
-  # 用官方二进制包安装（不依赖系统源，避免 DNS/源问题）
   local NODE_TAR="node-${NODE_VERSION}-linux-x64.tar.xz"
   if [ "$ARCH" = "aarch64" ]; then
     NODE_TAR="node-${NODE_VERSION}-linux-arm64.tar.xz"
@@ -153,20 +148,20 @@ install_node() {
   info "下载 Node.js ${NODE_VERSION}..."
   cd /tmp
   if command -v wget &>/dev/null; then
-    wget -q "$NODE_URL" -O "$NODE_TAR" || { err "下载失败，请检查网络"; exit 1; }
+    wget -q "$NODE_URL" -o /dev/null -O "$NODE_TAR" || { err "下载失败，请检查网络"; exit 1; }
   else
     curl -sL "$NODE_URL" -o "$NODE_TAR" || { err "下载失败，请检查网络"; exit 1; }
   fi
 
-  info "解压安装 Node.js..."
-  tar -xJf "$NODE_TAR" -C /usr/local --strip-components=1
+  info "解压安装 Node.js 到 $NODE_DIR..."
+  rm -rf "$NODE_DIR"
+  mkdir -p "$NODE_DIR"
+  tar -xJf "$NODE_TAR" -C "$NODE_DIR" --strip-components=1
   rm -f "$NODE_TAR"
-  ok "Node.js $(node -v) / npm $(npm -v) 安装完成"
+  ok "Node.js $($NODE_BIN -v) / npm $($NODE_DIR/bin/npm -v) 安装完成"
 }
 install_node
 
-# 动态获取 node 可执行文件路径（兼容系统预装 / 手动安装等不同位置）
-NODE_BIN=$(which node)
 info "Node.js 路径: $NODE_BIN"
 
 # ---------- 下载项目 ----------
