@@ -51,10 +51,23 @@ install_deps() {
   # node-pty 原生模块编译需要 python3 + g++ + make；Node.js 包需要 xz 解压
   if command -v apt-get &>/dev/null; then
     info "安装基础依赖（xz-utils build-essential python3）..."
-    apt-get update -qq && apt-get install -y -qq xz-utils build-essential python3 >/dev/null 2>&1 || {
-      warn "部分依赖安装失败，尝试仅安装 xz-utils..."
-      apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
-    }
+    if apt-get update -qq && apt-get install -y -qq xz-utils build-essential python3 >/dev/null 2>&1; then
+      ok "基础依赖安装完成"
+      return
+    fi
+    # fallback: Debian/Ubuntu 旧版本(EOL)源404时，临时换 archive 源
+    warn "默认源安装失败，尝试归档源..."
+    if [ -f /etc/apt/sources.list ] && grep -qE "deb\.debian\.org|archive\.ubuntu\.com" /etc/apt/sources.list; then
+      local CODENAME="$(grep -oP 'VERSION_CODENAME=\K\w+' /etc/os-release 2>/dev/null || echo bullseye)"
+      cp /etc/apt/sources.list /etc/apt/sources.list.qxuebak 2>/dev/null
+      cat > /etc/apt/sources.list <<APTEOF
+deb http://archive.debian.org/debian ${CODENAME} main contrib
+APTEOF
+      apt-get update -o Acquire::Check-Valid-Until=false -qq 2>/dev/null
+      apt-get install -y -qq xz-utils build-essential python3 >/dev/null 2>&1 || true
+      # 恢复原源
+      [ -f /etc/apt/sources.list.qxuebak ] && mv /etc/apt/sources.list.qxuebak /etc/apt/sources.list
+    fi
   elif command -v yum &>/dev/null; then
     info "安装基础依赖（xz gcc-c++ make python3）..."
     yum install -y -q xz gcc-c++ make python3 >/dev/null 2>&1 || true
@@ -66,6 +79,11 @@ install_deps() {
     apk add --no-cache xz build-base python3 >/dev/null 2>&1 || true
   else
     warn "未识别的包管理器，请确保已安装 xz、g++、make、python3"
+  fi
+  # 最终验证 xz 是否可用（解压 Node.js 必需）
+  if ! command -v xz &>/dev/null; then
+    err "xz 解压工具安装失败，无法继续。请手动安装 xz-utils 后重试。"
+    exit 1
   fi
   ok "基础依赖检查完成"
 }
