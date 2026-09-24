@@ -12,6 +12,9 @@ DB_FILE="$INSTALL_DIR/data/db.json"
 # 确保终端环境可用
 export TERM=xterm-256color
 
+# 动态获取 node 路径（兼容系统预装 / 手动安装等不同位置）
+NODE_BIN=$(which node 2>/dev/null || echo "$NODE_BIN")
+
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 CYAN=$'\033[0;36m'; BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 DIM=$'\033[2m'
@@ -109,7 +112,7 @@ do_restart() {
     systemctl restart $SERVICE_NAME && echo -e "${GREEN}✓ 服务已重启${NC}"
   else
     pkill -f "node server.js" 2>/dev/null; sleep 1
-    cd $INSTALL_DIR && nohup /usr/local/bin/node server.js > /tmp/qxuessh.log 2>&1 &
+    cd $INSTALL_DIR && nohup $NODE_BIN server.js > /tmp/qxuessh.log 2>&1 &
     echo -e "${GREEN}✓ 服务已重启${NC}"
   fi
   pause
@@ -138,7 +141,7 @@ do_start() {
   if command -v systemctl &>/dev/null; then
     systemctl start $SERVICE_NAME && echo -e "${GREEN}✓ 服务已启动${NC}"
   else
-    cd $INSTALL_DIR && nohup /usr/local/bin/node server.js > /tmp/qxuessh.log 2>&1 &
+    cd $INSTALL_DIR && nohup $NODE_BIN server.js > /tmp/qxuessh.log 2>&1 &
     echo -e "${GREEN}✓ 服务已启动${NC}"
   fi
   pause
@@ -195,7 +198,7 @@ do_resetpass() {
     echo -e "${RED}✗ 两次输入不一致${NC}"; pause; return
   fi
   cd $INSTALL_DIR
-  RESULT=$(/usr/local/bin/node -e "
+  RESULT=$($NODE_BIN -e "
 const fs = require('fs');
 const b = require('bcryptjs');
 try {
@@ -272,7 +275,7 @@ cmd_mode() {
       read -rsp "新密码: " P; echo
       read -rsp "确认密码: " P2; echo
       if [ "$P" = "$P2" ] && [ ${#P} -ge 8 ]; then
-        cd $INSTALL_DIR && /usr/local/bin/node -e "
+        cd $INSTALL_DIR && $NODE_BIN -e "
 const fs=require('fs'),b=require('bcryptjs');
 const db=JSON.parse(fs.readFileSync('$DB_FILE','utf8'));
 const a=db.users.find(u=>u.role==='admin');

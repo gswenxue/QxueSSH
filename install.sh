@@ -83,6 +83,10 @@ install_node() {
 }
 install_node
 
+# 动态获取 node 可执行文件路径（兼容系统预装 / 手动安装等不同位置）
+NODE_BIN=$(which node)
+info "Node.js 路径: $NODE_BIN"
+
 # ---------- 下载项目 ----------
 download_project() {
   if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/server.js" ]; then
@@ -162,7 +166,7 @@ done
 # ---------- 创建管理员数据 ----------
 info "创建管理员账号..."
 mkdir -p "$INSTALL_DIR/data"
-ADMIN_HASH=$(/usr/local/bin/node -e "
+ADMIN_HASH=$($NODE_BIN -e "
 const b=require('bcryptjs');
 const c=require('crypto');
 console.log(JSON.stringify({
@@ -206,7 +210,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/local/bin/node server.js
+ExecStart=$NODE_BIN server.js
 Environment=PORT=$APP_PORT
 Restart=always
 RestartSec=5
@@ -240,7 +244,7 @@ info "启动 QxueSSH 服务..."
 if create_systemd; then
   systemctl start $SERVICE_NAME
 else
-  cd "$INSTALL_DIR" && PORT=$APP_PORT nohup /usr/local/bin/node server.js > /tmp/qxuessh.log 2>&1 &
+  cd "$INSTALL_DIR" && PORT=$APP_PORT nohup $NODE_BIN server.js > /tmp/qxuessh.log 2>&1 &
 fi
 
 sleep 2
