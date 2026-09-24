@@ -330,13 +330,10 @@ DBEOF
 ok "管理员账号已创建"
 
 # ---------- 创建 systemd 服务 ----------
-create_systemd() {
-  if ! command -v systemctl &>/dev/null; then
-    warn "未检测到 systemd，将使用 nohup 方式运行"
-    return 1
-  fi
-
-  cat > /etc/systemd/system/${SERVICE_NAME}.service <<SVCEOF
+create_service() {
+  # systemd (Debian/Ubuntu/CentOS)
+  if command -v systemctl &>/dev/null; then
+    cat > /etc/systemd/system/${SERVICE_NAME}.service <<SVCEOF
 [Unit]
 Description=QxueSSH Web SSH Client
 After=network.target
@@ -353,11 +350,43 @@ User=root
 [Install]
 WantedBy=multi-user.target
 SVCEOF
+    systemctl daemon-reload
+    systemctl enable ${SERVICE_NAME} &>/dev/null
+    ok "systemd 服务已创建并设置自启动"
+    echo "systemd"
+    return 0
+  fi
 
-  systemctl daemon-reload
-  systemctl enable ${SERVICE_NAME} &>/dev/null
-  ok "systemd 服务已创建并设置自启动"
-  return 0
+  # OpenRC (Alpine/Gentoo)
+  if command -v rc-service &>/dev/null; then
+    cat > /etc/init.d/${SERVICE_NAME} <<SVCEOF
+#!/sbin/openrc-run
+
+description="QxueSSH Web SSH Client"
+command="$NODE_BIN"
+command_args="server.js"
+command_background="yes"
+directory="$INSTALL_DIR"
+pidfile="/run/\${RC_SVCNAME}.pid"
+env PORT="$APP_PORT"
+output_log="/var/log/qxuessh.log"
+error_log="/var/log/qxuessh.log"
+
+depend() {
+    need net
+    after firewall
+}
+SVCEOF
+    chmod +x /etc/init.d/${SERVICE_NAME}
+    rc-update add ${SERVICE_NAME} default &>/dev/null
+    ok "OpenRC 服务已创建并设置自启动"
+    echo "openrc"
+    return 0
+  fi
+
+  warn "未检测到 systemd 或 OpenRC，将使用 nohup 方式运行"
+  echo "nohup"
+  return 1
 }
 
 # ---------- 创建 qxuessh 管理命令 ----------
@@ -375,11 +404,12 @@ create_cli
 # ---------- 启动服务 ----------
 echo ""
 info "启动 QxueSSH 服务..."
-if create_systemd; then
-  systemctl start $SERVICE_NAME
-else
-  cd "$INSTALL_DIR" && PORT=$APP_PORT nohup $NODE_BIN server.js > /tmp/qxuessh.log 2>&1 &
-fi
+SERVICE_TYPE=$(create_service)
+case "$SERVICE_TYPE" in
+  systemd) systemctl start $SERVICE_NAME ;;
+  openrc)  rc-service $SERVICE_NAME start ;;
+  *)       cd "$INSTALL_DIR" && PORT=$APP_PORT nohup $NODE_BIN server.js > /tmp/qxuessh.log 2>&1 & ;;
+esac
 
 sleep 2
 
