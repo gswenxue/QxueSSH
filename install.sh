@@ -46,18 +46,52 @@ detect_os() {
 }
 detect_os
 
-# ---------- 安装基础依赖（xz解压 + node-pty编译工具） ----------
+# ---------- 预编译包检测 ----------
+# 预编译 node_modules 仅适用于 linux + glibc + x86_64/aarch64
+PREBUILT_AVAILABLE=0
+PREBUILT_ARCH=""
+detect_prebuilt() {
+  if [ "$(uname -s)" != "Linux" ]; then return; fi
+  local ARCH=$(uname -m)
+  if [ "$ARCH" = "x86_64" ]; then PREBUILT_ARCH="x64"; elif [ "$ARCH" = "aarch64" ]; then PREBUILT_ARCH="arm64"; else return; fi
+  # 检测 glibc（Alpine 用 musl，不兼容预编译二进制）
+  if ldd --version 2>&1 | head -1 | grep -qi "glibc\|GNU C Library"; then
+    PREBUILT_AVAILABLE=1
+  fi
+}
+detect_prebuilt
+
+# ---------- 安装基础依赖 ----------
 install_deps() {
-  # node-pty 原生模块编译需要 python3 + g++ + make；Node.js 包需要 xz 解压
+  if [ "$PREBUILT_AVAILABLE" = "1" ]; then
+    info "检测到兼容平台（linux/$PREBUILT_ARCH/glibc），将使用预编译 node_modules，无需编译工具"
+    # 预编译模式只需 xz 解压 Node.js 和预编译包
+    if command -v apt-get &>/dev/null; then
+      apt-get update -qq 2>/dev/null || true
+      apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
+    elif command -v yum &>/dev/null; then
+      yum install -y -q xz >/dev/null 2>&1 || true
+    elif command -v dnf &>/dev/null; then
+      dnf install -y -q xz >/dev/null 2>&1 || true
+    elif command -v apk &>/dev/null; then
+      apk add --no-cache xz >/dev/null 2>&1 || true
+    fi
+    if ! command -v xz &>/dev/null; then
+      err "xz 解压工具安装失败，无法继续。请手动安装 xz-utils 后重试。"
+      exit 1
+    fi
+    ok "基础依赖检查完成（预编译模式）"
+    return
+  fi
+
+  # 非预编译模式：需要完整编译工具
+  info "安装基础依赖（xz-utils g++ make python3）..."
   if command -v apt-get &>/dev/null; then
-    info "安装基础依赖（xz-utils g++ make python3）..."
     apt-get update -qq 2>/dev/null || true
-    # 分开安装：xz-utils 必需优先，编译工具可选
     apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
     apt-get install -y -qq g++ make python3 >/dev/null 2>&1 || true
     if command -v xz &>/dev/null && command -v g++ &>/dev/null; then ok "基础依赖安装完成"; return; fi
-
-    # fallback: Debian/Ubuntu 旧版本(EOL)源404时，临时换 archive 源
+    # fallback: Debian/Ubuntu EOL 源
     if [ -f /etc/apt/sources.list ] && grep -qE "deb\.debian\.org|archive\.ubuntu\.com" /etc/apt/sources.list; then
       warn "默认源安装失败，尝试归档源..."
       local CODENAME="$(grep -oP 'VERSION_CODENAME=\K\w+' /etc/os-release 2>/dev/null || echo bullseye)"
@@ -67,7 +101,6 @@ deb http://archive.debian.org/debian ${CODENAME} main contrib
 APTEOF
       apt-get update -o Acquire::Check-Valid-Until=false -qq 2>/dev/null || true
       apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
-      # g++ 可能因 libc6-dev 版本不匹配失败，尝试允许降级 dev 包
       if ! apt-get install -y -qq g++ make python3 >/dev/null 2>&1; then
         warn "编译工具版本冲突，尝试降级 libc6-dev..."
         apt-get install -y -qq --allow-downgrades libc6-dev >/dev/null 2>&1 || true
@@ -76,18 +109,14 @@ APTEOF
       [ -f /etc/apt/sources.list.qxuebak ] && mv /etc/apt/sources.list.qxuebak /etc/apt/sources.list
     fi
   elif command -v yum &>/dev/null; then
-    info "安装基础依赖（xz gcc-c++ make python3）..."
     yum install -y -q xz gcc-c++ make python3 >/dev/null 2>&1 || true
   elif command -v dnf &>/dev/null; then
-    info "安装基础依赖（xz gcc-c++ make python3）..."
     dnf install -y -q xz gcc-c++ make python3 >/dev/null 2>&1 || true
   elif command -v apk &>/dev/null; then
-    info "安装基础依赖（xz build-base python3）..."
     apk add --no-cache xz build-base python3 >/dev/null 2>&1 || true
   else
     warn "未识别的包管理器，请确保已安装 xz、g++、make、python3"
   fi
-  # 最终验证：xz 必需，g++ 缺失时警告（本机终端不可用但SSH功能正常）
   if ! command -v xz &>/dev/null; then
     err "xz 解压工具安装失败，无法继续。请手动安装 xz-utils 后重试。"
     exit 1
@@ -176,20 +205,40 @@ download_project
 cd "$INSTALL_DIR"
 info "安装 npm 依赖..."
 
-# 低内存机器自动创建 swap，防止编译 node-pty 时 OOM
-MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
-if [ -n "$MEM_TOTAL_KB" ] && [ "$MEM_TOTAL_KB" -lt 1048576 ]; then
-  if [ ! -f /tmp/qxue_swap ]; then
-    warn "内存不足 1GB，自动创建 1GB swap 以支持编译..."
-    fallocate -l 1G /tmp/qxue_swap 2>/dev/null || dd if=/dev/zero of=/tmp/qxue_swap bs=1M count=1024 2>/dev/null
-    chmod 600 /tmp/qxue_swap
-    mkswap /tmp/qxue_swap >/dev/null 2>&1
-    swapon /tmp/qxue_swap 2>/dev/null && info "swap 已启用" || warn "swap 创建失败，编译可能因内存不足失败"
+# 优先使用预编译 node_modules（跳过本地编译，节省时间和内存）
+PREBUILT_OK=0
+if [ "$PREBUILT_AVAILABLE" = "1" ]; then
+  PREBUILT_URL="https://github.com/gswenxue/QxueSSH/releases/download/prebuilt-v1/node_modules-linux-${PREBUILT_ARCH}.tar.gz"
+  info "尝试下载预编译 node_modules（linux-${PREBUILT_ARCH}）..."
+  if curl -sL --fail "$PREBUILT_URL" -o /tmp/qxue_node_modules.tar.gz 2>/dev/null && [ -s /tmp/qxue_node_modules.tar.gz ]; then
+    tar -xzf /tmp/qxue_node_modules.tar.gz -C "$INSTALL_DIR"
+    rm -f /tmp/qxue_node_modules.tar.gz
+    if [ -d "$INSTALL_DIR/node_modules" ] && [ -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then
+      ok "预编译 node_modules 已就绪（跳过本地编译）"
+      PREBUILT_OK=1
+    fi
+  fi
+  if [ "$PREBUILT_OK" = "0" ]; then
+    warn "预编译包下载失败，回退到本地编译..."
   fi
 fi
 
-npm install --production --registry=https://registry.npmmirror.com 2>/dev/null || npm install --production
-ok "依赖安装完成"
+# 预编译失败或不支持的平台，走 npm install
+if [ "$PREBUILT_OK" = "0" ]; then
+  # 低内存机器自动创建 swap，防止编译 node-pty 时 OOM
+  MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+  if [ -n "$MEM_TOTAL_KB" ] && [ "$MEM_TOTAL_KB" -lt 1048576 ]; then
+    if [ ! -f /tmp/qxue_swap ]; then
+      warn "内存不足 1GB，自动创建 1GB swap 以支持编译..."
+      fallocate -l 1G /tmp/qxue_swap 2>/dev/null || dd if=/dev/zero of=/tmp/qxue_swap bs=1M count=1024 2>/dev/null
+      chmod 600 /tmp/qxue_swap
+      mkswap /tmp/qxue_swap >/dev/null 2>&1
+      swapon /tmp/qxue_swap 2>/dev/null && info "swap 已启用" || warn "swap 创建失败，编译可能因内存不足失败"
+    fi
+  fi
+  npm install --production --registry=https://registry.npmmirror.com 2>/dev/null || npm install --production
+  ok "依赖安装完成"
+fi
 
 # ---------- 交互式配置 ----------
 echo ""
