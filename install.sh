@@ -51,7 +51,7 @@ install_deps() {
   # node-pty 原生模块编译需要 python3 + g++ + make；Node.js 包需要 xz 解压
   if command -v apt-get &>/dev/null; then
     info "安装基础依赖（xz-utils g++ make python3）..."
-    apt-get update -qq 2>/dev/null
+    apt-get update -qq 2>/dev/null || true
     # 分开安装：xz-utils 必需优先，编译工具可选
     apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
     apt-get install -y -qq g++ make python3 >/dev/null 2>&1 || true
@@ -65,7 +65,7 @@ install_deps() {
       cat > /etc/apt/sources.list <<APTEOF
 deb http://archive.debian.org/debian ${CODENAME} main contrib
 APTEOF
-      apt-get update -o Acquire::Check-Valid-Until=false -qq 2>/dev/null
+      apt-get update -o Acquire::Check-Valid-Until=false -qq 2>/dev/null || true
       apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
       # g++ 可能因 libc6-dev 版本不匹配失败，尝试允许降级 dev 包
       if ! apt-get install -y -qq g++ make python3 >/dev/null 2>&1; then
