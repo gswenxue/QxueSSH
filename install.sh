@@ -46,6 +46,31 @@ detect_os() {
 }
 detect_os
 
+# ---------- 安装基础依赖（xz解压 + node-pty编译工具） ----------
+install_deps() {
+  # node-pty 原生模块编译需要 python3 + g++ + make；Node.js 包需要 xz 解压
+  if command -v apt-get &>/dev/null; then
+    info "安装基础依赖（xz-utils build-essential python3）..."
+    apt-get update -qq && apt-get install -y -qq xz-utils build-essential python3 >/dev/null 2>&1 || {
+      warn "部分依赖安装失败，尝试仅安装 xz-utils..."
+      apt-get install -y -qq xz-utils >/dev/null 2>&1 || true
+    }
+  elif command -v yum &>/dev/null; then
+    info "安装基础依赖（xz gcc-c++ make python3）..."
+    yum install -y -q xz gcc-c++ make python3 >/dev/null 2>&1 || true
+  elif command -v dnf &>/dev/null; then
+    info "安装基础依赖（xz gcc-c++ make python3）..."
+    dnf install -y -q xz gcc-c++ make python3 >/dev/null 2>&1 || true
+  elif command -v apk &>/dev/null; then
+    info "安装基础依赖（xz build-base python3）..."
+    apk add --no-cache xz build-base python3 >/dev/null 2>&1 || true
+  else
+    warn "未识别的包管理器，请确保已安装 xz、g++、make、python3"
+  fi
+  ok "基础依赖检查完成"
+}
+install_deps
+
 # ---------- 安装 Node.js ----------
 install_node() {
   if command -v node &>/dev/null; then
@@ -186,6 +211,7 @@ cat > "$INSTALL_DIR/data/db.json" <<DBEOF
   "keys": [],
   "loginLogs": {},
   "regEnabled": true,
+  "localTerminalEnabled": false,
   "meta": { "lastSync": 0 },
   "backup": {
     "enabled": false, "webdavUrl": "", "username": "", "password": "",
