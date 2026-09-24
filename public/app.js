@@ -223,12 +223,16 @@ function renderUserArea() {
       <span class="logout-link" id="btnLogout">退出</span>`;
     $('#btnProfile').addEventListener('click', openProfile);
     $('#btnLogout').addEventListener('click', async () => {
+      // 退出前关闭所有已打开的终端连接，防止未授权使用
+      for (const connId of [...state.conns.keys()]) closeSession(connId);
+      state.fileConnId = null;
       try { await api('/logout', { method: 'POST' }); } catch (e) { /* ignore */ }
       state.token = null; state.user = null;
       localStorage.removeItem('qxue_token');
       state.hosts = [];
       customKeys = [];
       renderUserArea(); renderHosts(); renderQuickKeys();
+      updateMonitorDisplay();
       toast('已退出登录');
     });
   } else {
@@ -523,7 +527,12 @@ function createSession({ label, hostId, creds }) {
   tabEl.className = 'tab';
   tabEl.innerHTML = `<span class="tab-status connecting"></span><span class="tab-label">${escapeHtml(label)}</span><span class="tab-close">×</span>`;
   tabEl.addEventListener('click', e => {
-    if (e.target.classList.contains('tab-close')) { closeSession(connId); return; }
+    if (e.target.classList.contains('tab-close')) {
+      const c = state.conns.get(connId);
+      const label = c ? c.label : '该会话';
+      confirmDlg('关闭终端', `确定关闭「${label}」的终端连接吗？关闭后需要重新连接。`, () => closeSession(connId));
+      return;
+    }
     switchSession(connId);
   });
   $('#tabList').appendChild(tabEl);
@@ -563,6 +572,12 @@ function switchSession(connId) {
     }, 30);
   }
   updateMonitorDisplay();
+  // 文件面板跟随当前激活的连接切换（不同主机路径无意义，重置后进入 HOME）
+  const activeConn = state.conns.get(connId);
+  if (activeConn && activeConn.status === 'connected' && state.fileConnId !== connId) {
+    state.fileConnId = connId;
+    resetFileBrowser();
+  }
   if ($('#panel-files').classList.contains('active') || !$('#fileList .empty-hint')) refreshFilesIfReady();
 }
 
@@ -744,7 +759,16 @@ function updateMonitorDisplay() {
       <div class="mc-value">${value}</div>
       ${percent != null ? `<div class="m-bar"><div class="${barCls(percent)}" style="width:${percent}%"></div></div>` : ''}
     </div>`;
-  let html = mon('CPU 使用率', m.cpuPercent != null ? m.cpuPercent.toFixed(1) + '%' : '--', m.cpuPercent);
+  let html = '';
+  // 系统版本（最上方）
+  if (m.os) {
+    html += `
+    <div class="mon-card">
+      <div class="mc-title"><span>系统</span></div>
+      <div class="mc-value" style="font-size:14px">${escapeHtml(m.os)}</div>
+    </div>`;
+  }
+  html += mon('CPU 使用率', m.cpuPercent != null ? m.cpuPercent.toFixed(1) + '%' : '--', m.cpuPercent);
   if (m.mem) {
     const usedB = (m.mem.totalKB - m.mem.availKB) * 1024;
     const totalB = m.mem.totalKB * 1024;
@@ -1992,6 +2016,9 @@ async function loadProfile() {
     $('#pfName').innerHTML = escapeHtml(p.username) +
       (p.role === 'admin' ? ' <span class="role-badge">管理员</span>' : '');
     $('#pfSub').textContent = `注册于 ${fmtTime(p.createdAt)}`;
+    // 管理员账号不显示注销按钮，避免误操作导致无管理员
+    const dangerZone = document.querySelector('#ptab-account .pf-danger-zone');
+    if (dangerZone) dangerZone.style.display = p.role === 'admin' ? 'none' : '';
     const log = $('#pfLoginLog');
     if (!p.logins.length) {
       log.innerHTML = '<div class="empty-hint">暂无登录记录</div>';
@@ -2352,6 +2379,44 @@ $('#setMonitorBar').addEventListener('change', e => {
   localStorage.setItem('qxue_monitorbar', e.target.checked ? '1' : '0');
   $('#monitorBar').classList.toggle('hidden', !e.target.checked);
 });
+
+/* ---------------- 快捷键条：桌面端鼠标拖拽 / 滚轮横向滚动 ---------------- */
+(function enableQuickKeysScroll() {
+  const bar = $('#quickKeysBar');
+  if (!bar) return;
+
+  // 鼠标按住拖拽横向滚动
+  let isDown = false, startX = 0, scrollLeft = 0, moved = false;
+  bar.addEventListener('mousedown', e => {
+    // 仅鼠标左键（e.button === 0），且不是在按钮上直接点击时才启动拖拽
+    isDown = true; moved = false;
+    startX = e.pageX - bar.offsetLeft;
+    scrollLeft = bar.scrollLeft;
+    bar.style.cursor = 'grabbing';
+  });
+  bar.addEventListener('mouseleave', () => { isDown = false; bar.style.cursor = ''; });
+  bar.addEventListener('mouseup', () => { isDown = false; bar.style.cursor = ''; });
+  bar.addEventListener('mousemove', e => {
+    if (!isDown) return;
+    e.preventDefault();
+    const x = e.pageX - bar.offsetLeft;
+    const walk = (x - startX) * 1.5; // 拖拽灵敏度
+    if (Math.abs(walk) > 3) moved = true;
+    bar.scrollLeft = scrollLeft - walk;
+  });
+  // 拖拽后阻止按钮 click 触发
+  bar.addEventListener('click', e => {
+    if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; }
+  }, true);
+
+  // 鼠标滚轮横向滚动（普通滚轮直接横滚；Shift+滚轮也横滚）
+  bar.addEventListener('wheel', e => {
+    if (e.deltaY !== 0 && Math.abs(e.deltaY) > Math.abs(e.deltaX || 0)) {
+      e.preventDefault();
+      bar.scrollLeft += e.deltaY;
+    }
+  }, { passive: false });
+})();
 
 /* ---------------- 初始化 ---------------- */
 (async function init() {

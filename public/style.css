@@ -130,6 +130,7 @@ body {
 #menu {
   width: 76px; background: var(--menu-bg); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; padding-top: 8px; flex-shrink: 0;
+  position: relative; z-index: 2; /* 收起侧栏时 panel 会左移叠到 menu 下方，需保证 menu 在上层 */
 }
 .menu-item {
   display: flex; flex-direction: column; align-items: center; gap: 4px;

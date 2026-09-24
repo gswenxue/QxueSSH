@@ -45,6 +45,47 @@
 
 ## 部署
 
+### 一键部署（推荐）
+
+在服务器上执行以下命令，脚本会自动安装 Node.js 环境、下载项目、配置管理员账号和端口，并注册为 systemd 服务：
+
+```bash
+curl -O https://raw.githubusercontent.com/gswenxue/QxueSSH/main/install.sh && bash install.sh
+```
+
+部署过程中会交互式询问：
+- 管理员用户名（默认 `Qxue`）
+- 是否自定义管理员密码（选 `y` 后需两次输入确认，至少 8 位；否则使用默认密码）
+- 服务监听端口（默认 `3000`）
+
+部署完成后会输出访问地址、管理员账号和密码，请妥善保存。
+
+### 服务管理命令
+
+部署完成后，可使用 `qxuessh` 命令进行交互式管理：
+
+```bash
+qxuessh
+```
+
+唤起数字菜单，顶部实时显示运行状态、端口、自启状态，通过序号选择操作：
+
+| 序号 | 功能 |
+|------|------|
+| 1 | 重启服务 |
+| 2 | 停止服务 |
+| 3 | 启动服务 |
+| 4 | 修改运行端口 |
+| 5 | 开机自启动管理 |
+| 6 | 重置管理员密码 |
+| 7 | 查看运行日志 |
+| 8 | 查看服务详情 |
+| 0 | 退出 |
+
+也支持直接命令模式：`qxuessh status`、`qxuessh restart`、`qxuessh port 8080`、`qxuessh autostart on` 等。
+
+### 手动部署
+
 要求：Node.js 18+
 
 ```bash
@@ -73,29 +114,7 @@ PORT=8080 node server.js
 
 ### 生产环境建议
 
-- 用 systemd 常驻运行：
-
-```ini
-# /etc/systemd/system/qxuessh.service
-[Unit]
-Description=QxueSSH Web SSH Client
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/QxueSSH
-ExecStart=/usr/bin/node server.js
-Environment=PORT=3000
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl enable --now qxuessh
-```
-
+- 一键部署脚本已自动配置 systemd 常驻运行与开机自启动
 - 建议用 Nginx / Caddy 反向代理并配置 HTTPS（设置中可开启"信任代理头"获取真实 IP）
 
 ## 配置说明

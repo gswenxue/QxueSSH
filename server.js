@@ -354,8 +354,16 @@ app_.post('/login', (req, res) => {
 });
 
 app_.post('/logout', requireAuth, (req, res) => {
-  delete db.tokens[req.token];
+  const token = req.token;
+  delete db.tokens[token];
   saveDB();
+  // 强制断开该 token 的所有 WebSocket 连接（关闭所有 SSH 会话）
+  if (tokenSockets.has(token)) {
+    for (const sock of tokenSockets.get(token)) {
+      try { sock.disconnect(true); } catch (e) { /* ignore */ }
+    }
+    tokenSockets.delete(token);
+  }
   res.json({ ok: true });
 });
 
@@ -745,13 +753,19 @@ app_.post('/admin/backup/run', requireAdmin, async (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 5e6 });
 
+// token -> Set<socket>：退出登录时强制断开该用户的所有 WebSocket 连接
+const tokenSockets = new Map();
+
 const MONITOR_CMD = [
+  // 系统版本（兼容 Alpine / Debian / Ubuntu 等，均有 /etc/os-release）
+  'echo "OS=`cat /etc/os-release 2>/dev/null | grep \'^PRETTY_NAME=\' | cut -d= -f2 | tr -d \'"\'`"',
   'echo "CPU=`grep \'^cpu \' /proc/stat`"',
   'echo "MEMT=`grep \'^MemTotal:\' /proc/meminfo`"',
   'echo "MEMA=`grep \'^MemAvailable:\' /proc/meminfo`"',
   'echo "SWAPT=`grep \'^SwapTotal:\' /proc/meminfo`"',
   'echo "SWAPF=`grep \'^SwapFree:\' /proc/meminfo`"',
-  'df -B1 -P -x tmpfs -x devtmpfs -x overlay -x squashfs -x proc -x sysfs 2>/dev/null | tail -n +2 | sed "s/^/DISK=/"',
+  // 磁盘：用 df -k -P（POSIX 格式、KB 单位），兼容 Alpine BusyBox df（不支持 -B1/-x）
+  'df -k -P 2>/dev/null | tail -n +2 | sed "s/^/DISK=/"',
   'echo "LOAD=`cat /proc/loadavg 2>/dev/null`"',
   'echo "UP=`cat /proc/uptime 2>/dev/null`"',
   'echo "NET=`cat /proc/net/dev 2>/dev/null`"',
@@ -761,6 +775,13 @@ const MONITOR_CMD = [
 io.on('connection', (socket) => {
   // connId -> { client, stream, sftp, sftpLoading, monitorTimer, monitorPrev, closed }
   const conns = new Map();
+
+  // 注册 token -> socket 映射（用于退出登录时强制断开所有连接）
+  const sockToken = (socket.handshake.auth && socket.handshake.auth.token) || null;
+  if (sockToken) {
+    if (!tokenSockets.has(sockToken)) tokenSockets.set(sockToken, new Set());
+    tokenSockets.get(sockToken).add(socket);
+  }
 
   function getSession(connId) {
     return conns.get(connId);
@@ -1203,6 +1224,11 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     for (const connId of conns.keys()) closeSession(connId);
+    // 从 token-socket 映射中移除
+    if (sockToken && tokenSockets.has(sockToken)) {
+      tokenSockets.get(sockToken).delete(socket);
+      if (tokenSockets.get(sockToken).size === 0) tokenSockets.delete(sockToken);
+    }
   });
 });
 
@@ -1272,6 +1298,9 @@ function parseMonitor(out, prev) {
     return l ? l.slice(prefix.length) : '';
   };
 
+  // 系统版本（/etc/os-release 的 PRETTY_NAME，如 "Alpine Linux v3.20"、"Debian GNU/Linux 12 (bookworm)"）
+  const os = get('OS=').trim() || null;
+
   // CPU（"cpu  user nice system idle iowait irq softirq steal ..."，去掉首个 "cpu" 标记）
   let cpuPercent = null;
   const cpuTokens = get('CPU=').trim().split(/\s+/);
@@ -1304,19 +1333,25 @@ function parseMonitor(out, prev) {
     swap = { percent: usedKB / swapTotalKB * 100, totalKB: swapTotalKB, usedKB, freeKB: swapFreeKB };
   }
 
-  // 磁盘（所有实体分区，排除虚拟文件系统）
+  // 磁盘（df -k -P 输出，KB 单位；过滤虚拟文件系统，兼容 Alpine BusyBox df）
+  const VIRTUAL_FS = ['tmpfs', 'devtmpfs', 'overlay', 'squashfs', 'proc', 'sysfs', 'debugfs', 'configfs', 'fusectl', 'cgroup', 'cgroup2', 'pstore', 'bpf', 'mqueue', 'hugetlbfs', 'tracefs', 'binfmt_misc', 'autofs', 'rpc_pipefs', 'nsfs'];
   const disks = [];
   for (const l of lines) {
     if (!l.startsWith('DISK=')) continue;
     const parts = l.slice(5).trim().split(/\s+/);
     if (parts.length >= 6) {
-      const d = {
-        fs: parts[0],
-        total: +parts[1], used: +parts[2], avail: +parts[3],
+      const fsName = parts[0];
+      // 过滤虚拟文件系统（按设备名前缀 / 类型判断，Alpine df 不输出类型列）
+      if (VIRTUAL_FS.some(v => fsName === v || fsName.startsWith(v + '/'))) continue;
+      if (fsName.startsWith('none') || fsName === 'udev' || fsName === 'devfs') continue;
+      const totalKB = +parts[1], usedKB = +parts[2], availKB = +parts[3];
+      if (totalKB <= 0) continue;
+      disks.push({
+        fs: fsName,
+        total: totalKB * 1024, used: usedKB * 1024, avail: availKB * 1024,
         percent: parseFloat(parts[4]) || 0,
         mount: parts.slice(5).join(' ')
-      };
-      if (d.total > 0) disks.push(d);
+      });
     }
   }
   const rootDisk = disks.find(d => d.mount === '/') || disks[0] || null;
@@ -1364,6 +1399,7 @@ function parseMonitor(out, prev) {
   }
 
   return {
+    os,
     cpuPercent,
     mem: memPercent != null ? { percent: memPercent, totalKB: memTotalKB, availKB: memAvailKB } : null,
     swap,
