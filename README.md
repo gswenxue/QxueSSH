@@ -64,7 +64,9 @@
 curl -O https://raw.githubusercontent.com/gswenxue/QxueSSH/main/install.sh && bash install.sh
 ```
 
-**预编译加速**：Debian/Ubuntu（glibc）x86_64 / arm64 系统自动下载预编译的 `node_modules`（含 node-pty 原生二进制），跳过本地编译，安装仅需 20-40 秒。Alpine（musl）及其他架构自动回退到本地编译。
+**预编译加速**：Debian/Ubuntu/CentOS（glibc）和 Alpine（musl）的 x86_64 / arm64 系统自动下载预编译的 `node_modules`（含 node-pty 原生二进制），跳过本地编译，安装仅需 20-40 秒。其他架构自动回退到本地编译。
+
+> **Alpine 注意**：Alpine 使用 musl libc，官方 Node.js 二进制不兼容，脚本会自动通过 `apk` 安装仓库版 Node.js（v20.x），并下载 musl 版本的预编译 node_modules。
 
 部署过程中会交互式询问：
 - 管理员用户名（默认 `Qxue`）
@@ -157,7 +159,7 @@ PORT=8080 node server.js
 | 磁盘 | 200MB | 500MB+ |
 | 系统 | Debian 10+ / Ubuntu 18.04+ / CentOS 7+ / Alpine | Debian/Ubuntu LTS |
 
-> 预编译模式下无需编译工具，低内存机器也可流畅安装；Alpine 等 musl 系统需本地编译，建议 1GB+ 内存。
+> 预编译模式下无需编译工具，低内存机器也可流畅安装；glibc 和 musl(Alpine) 均已提供预编译包。其他架构需本地编译，建议 1GB+ 内存。
 
 ## 二次开发注意
 
