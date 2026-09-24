@@ -47,15 +47,20 @@ detect_os() {
 detect_os
 
 # ---------- 预编译包检测 ----------
-# 预编译 node_modules 仅适用于 linux + glibc + x86_64/aarch64
+# 预编译 node_modules 适用于 linux + x86_64/aarch64，支持 glibc 和 musl(Alpine)
 PREBUILT_AVAILABLE=0
 PREBUILT_ARCH=""
+PREBUILT_LIBC=""
 detect_prebuilt() {
   if [ "$(uname -s)" != "Linux" ]; then return; fi
   local ARCH=$(uname -m)
   if [ "$ARCH" = "x86_64" ]; then PREBUILT_ARCH="x64"; elif [ "$ARCH" = "aarch64" ]; then PREBUILT_ARCH="arm64"; else return; fi
-  # 检测 glibc（Alpine 用 musl，不兼容预编译二进制）
+  # 检测 libc 类型：glibc (Debian/Ubuntu/CentOS) 或 musl (Alpine)
   if ldd --version 2>&1 | head -1 | grep -qi "glibc\|GNU C Library"; then
+    PREBUILT_LIBC="glibc"
+    PREBUILT_AVAILABLE=1
+  elif ldd --version 2>&1 | head -1 | grep -qi "musl"; then
+    PREBUILT_LIBC="musl"
     PREBUILT_AVAILABLE=1
   fi
 }
@@ -64,7 +69,7 @@ detect_prebuilt
 # ---------- 安装基础依赖 ----------
 install_deps() {
   if [ "$PREBUILT_AVAILABLE" = "1" ]; then
-    info "检测到兼容平台（linux/$PREBUILT_ARCH/glibc），将使用预编译 node_modules，无需编译工具"
+    info "检测到兼容平台（linux/$PREBUILT_ARCH/$PREBUILT_LIBC），将使用预编译 node_modules，无需编译工具"
     # 预编译模式只需 xz 解压 Node.js 和预编译包
     if command -v apt-get &>/dev/null; then
       apt-get update -qq 2>/dev/null || true
@@ -74,7 +79,8 @@ install_deps() {
     elif command -v dnf &>/dev/null; then
       dnf install -y -q xz >/dev/null 2>&1 || true
     elif command -v apk &>/dev/null; then
-      apk add --no-cache xz >/dev/null 2>&1 || true
+      # Alpine 需要 libstdc++ 运行官方 Node.js 二进制
+      apk add --no-cache xz libstdc++ gcompat >/dev/null 2>&1 || true
     fi
     if ! command -v xz &>/dev/null; then
       err "xz 解压工具安装失败，无法继续。请手动安装 xz-utils 后重试。"
@@ -203,7 +209,9 @@ info "安装 npm 依赖..."
 # 优先使用预编译 node_modules（跳过本地编译，节省时间和内存）
 PREBUILT_OK=0
 if [ "$PREBUILT_AVAILABLE" = "1" ]; then
-  PREBUILT_URL="https://github.com/gswenxue/QxueSSH/releases/download/prebuilt-v1/node_modules-linux-${PREBUILT_ARCH}.tar.gz"
+  PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}.tar.gz"
+  [ "$PREBUILT_LIBC" = "musl" ] && PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}-musl.tar.gz"
+  PREBUILT_URL="https://github.com/gswenxue/QxueSSH/releases/download/prebuilt-v1/${PREBUILT_PKG}"
   info "尝试下载预编译 node_modules（linux-${PREBUILT_ARCH}）..."
   if curl -sL --fail "$PREBUILT_URL" -o /tmp/qxue_node_modules.tar.gz 2>/dev/null && [ -s /tmp/qxue_node_modules.tar.gz ]; then
     tar -xzf /tmp/qxue_node_modules.tar.gz -C "$INSTALL_DIR"
