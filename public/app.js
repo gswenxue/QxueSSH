@@ -286,13 +286,23 @@ $('#authCaptcha').addEventListener('keydown', e => { if (e.key === 'Enter') $('#
 
 /* ---------------- 主机列表 ---------------- */
 async function loadHosts() {
-  if (!state.user) { state.hosts = []; renderHosts(); return; }
+  if (!state.user) { state.hosts = []; state.localTerminalEnabled = false; renderHosts(); return; }
   try {
     const data = await api('/hosts');
     state.hosts = data.hosts;
+    // 管理员额外加载本机终端开关状态
+    if (state.user.role === 'admin') {
+      try {
+        const stats = await api('/admin/stats');
+        state.localTerminalEnabled = !!stats.localTerminalEnabled;
+      } catch (e) { state.localTerminalEnabled = false; }
+    } else {
+      state.localTerminalEnabled = false;
+    }
   } catch (e) {
     if (e.message.includes('未登录')) { state.user = null; state.token = null; localStorage.removeItem('qxue_token'); renderUserArea(); }
     state.hosts = [];
+    state.localTerminalEnabled = false;
   }
   renderHosts();
 }
@@ -306,11 +316,21 @@ function renderHosts() {
   } else {
     tip.classList.add('hidden');
   }
-  if (!state.hosts.length) {
-    list.innerHTML = '<div class="empty-hint">' + (state.user ? '还没有保存的主机，点击「+ 新增」添加一台吧' : '未登录，无保存数据') + '</div>';
-    return;
+
+  let html = '';
+
+  // 本机终端（固定置顶，紧凑样式，仅管理员且站点已开启时显示）
+  if (state.user && state.user.role === 'admin' && state.localTerminalEnabled) {
+    html += `
+      <div class="host-item host-local" data-local="1" title="直接访问部署本机的终端（仅管理员可用）">
+        <div class="h-name">🖥 本机终端</div>
+      </div>`;
   }
-  list.innerHTML = state.hosts.map(h => `
+
+  if (!state.hosts.length) {
+    html += '<div class="empty-hint">' + (state.user ? '还没有保存的主机，点击「+ 新增」添加一台吧' : '未登录，无保存数据') + '</div>';
+  } else {
+    html += state.hosts.map(h => `
     <div class="host-item" data-id="${h.id}">
       <div class="h-name">${escapeHtml(h.label)} <span class="h-badge">${h.port === 22 ? '22' : h.port}</span></div>
       <div class="h-addr">${escapeHtml(h.username)}@${escapeHtml(h.host)}</div>
@@ -321,7 +341,19 @@ function renderHosts() {
         <button class="del" title="删除">🗑</button>
       </div>
     </div>`).join('');
-  list.querySelectorAll('.host-item').forEach(item => {
+  }
+  list.innerHTML = html;
+
+  // 本机终端点击事件
+  const localItem = list.querySelector('.host-local');
+  if (localItem) {
+    localItem.addEventListener('click', () => {
+      if (!requireLoginForSSH()) return;
+      createSession({ label: '本机终端', isLocal: true });
+    });
+  }
+
+  list.querySelectorAll('.host-item:not(.host-local)').forEach(item => {
     const id = item.dataset.id;
     item.addEventListener('click', e => {
       if (e.target.closest('.h-actions')) return;
@@ -488,7 +520,7 @@ function connectHost(host) {
 }
 
 /* ---------------- 终端会话 ---------------- */
-function createSession({ label, hostId, creds }) {
+function createSession({ label, hostId, creds, isLocal }) {
   if (!state.token) { toast('SSH 功能需要登录后使用', 'err'); showEl('loginModal'); return; }
   // 移除欢迎页
   if (window._welcomeBox) { window._welcomeBox.remove(); window._welcomeBox = null; }
@@ -537,7 +569,7 @@ function createSession({ label, hostId, creds }) {
   });
   $('#tabList').appendChild(tabEl);
 
-  const conn = { connId, term, fit, box, tabEl, status: 'connecting', label, hostId, monitor: null, lastActive: Date.now(), busy: 0 };
+  const conn = { connId, term, fit, box, tabEl, status: 'connecting', label, hostId, isLocal: !!isLocal, monitor: null, lastActive: Date.now(), busy: 0 };
   state.conns.set(connId, conn);
 
   // 尺寸自适应
@@ -556,7 +588,7 @@ function createSession({ label, hostId, creds }) {
   term.writeln('\x1b[90m正在连接 ' + (creds ? creds.username + '@' + creds.host : label) + ' …\x1b[0m');
 
   socket.emit('c:ssh:connect', {
-    connId, hostId, token: state.token,
+    connId, hostId, token: state.token, isLocal: !!isLocal,
     cols: term.cols, rows: term.rows, ...(creds || {})
   });
 }
@@ -2116,6 +2148,8 @@ async function loadAdminStats() {
     $('#adUserCount').textContent = s.count;
     $('#adHostCount').textContent = s.users.reduce((a, u) => a + u.hosts, 0);
     $('#adRegSwitch').checked = s.regEnabled;
+    $('#adLocalTermSwitch').checked = !!s.localTerminalEnabled;
+    state.localTerminalEnabled = !!s.localTerminalEnabled;
     adminUsers = s.users;
     const totalPages = Math.max(1, Math.ceil(adminUsers.length / ADMIN_PAGE_SIZE));
     if (adminPage > totalPages) adminPage = totalPages;
@@ -2271,6 +2305,67 @@ $('#adRegSwitch').addEventListener('change', async (e) => {
   } catch (err2) {
     e.target.checked = !e.target.checked;
     toast(err2.message, 'err');
+  }
+});
+
+/* --- 本机终端开关 --- */
+let ltAuthType = 'password';
+$$('#localTermModal [data-ltauth]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('#localTermModal [data-ltauth]').forEach(b => b.classList.toggle('active', b === btn));
+    ltAuthType = btn.dataset.ltauth;
+    $('#ltPasswordWrap').classList.toggle('hidden', ltAuthType !== 'password');
+    $('#ltKeyWrap').classList.toggle('hidden', ltAuthType !== 'key');
+  });
+});
+
+$('#adLocalTermSwitch').addEventListener('change', async (e) => {
+  if (!e.target.checked) {
+    // 关闭：直接调用 API，成功后重新加载状态
+    try {
+      await api('/admin/local-terminal', { method: 'POST', body: { enabled: false } });
+      await loadHosts();
+      toast('已关闭本机终端', 'ok');
+    } catch (err2) {
+      e.target.checked = true;
+      toast(err2.message, 'err');
+    }
+    return;
+  }
+  // 开启：弹出 SSH 凭据验证
+  ltAuthType = 'password';
+  $$('#localTermModal [data-ltauth]').forEach(b => b.classList.toggle('active', b.dataset.ltauth === 'password'));
+  $('#ltPasswordWrap').classList.remove('hidden');
+  $('#ltKeyWrap').classList.add('hidden');
+  $('#ltPassword').value = '';
+  $('#ltPrivateKey').value = '';
+  $('#ltPassphrase').value = '';
+  $('#ltError').classList.add('hidden');
+  showEl('localTermModal');
+});
+
+$('#btnLocalTermOk').addEventListener('click', async () => {
+  const body = { enabled: true };
+  if (ltAuthType === 'password') {
+    body.password = $('#ltPassword').value;
+    if (!body.password) { $('#ltError').textContent = '请输入密码'; $('#ltError').classList.remove('hidden'); return; }
+  } else {
+    body.privateKey = $('#ltPrivateKey').value.trim();
+    body.passphrase = $('#ltPassphrase').value || undefined;
+    if (!body.privateKey) { $('#ltError').textContent = '请粘贴私钥内容'; $('#ltError').classList.remove('hidden'); return; }
+  }
+  $('#btnLocalTermOk').disabled = true;
+  try {
+    const r = await api('/admin/local-terminal', { method: 'POST', body });
+    await loadHosts();
+    hideEl('localTermModal');
+    toast('本机终端已启用（仅管理员可见）', 'ok');
+  } catch (err2) {
+    $('#ltError').textContent = err2.message;
+    $('#ltError').classList.remove('hidden');
+    $('#adLocalTermSwitch').checked = false;
+  } finally {
+    $('#btnLocalTermOk').disabled = false;
   }
 });
 

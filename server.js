@@ -11,6 +11,8 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { Client } = require('ssh2');
 const { Server } = require('socket.io');
+const pty = require('node-pty');
+const { exec } = require('child_process');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -46,6 +48,7 @@ let db = {
   users: [], hosts: [], tokens: {}, keys: [],
   loginLogs: {},          // userId -> [{time, ip, ua}]
   regEnabled: true,       // 站点注册开关
+  localTerminalEnabled: false, // 本机终端开关（仅管理员可见可用）
   meta: { lastSync: 0 },  // 云端数据最新同步时间
   backup: defaultBackupCfg()
 };
@@ -55,7 +58,7 @@ function loadDB() {
     if (fs.existsSync(DB_FILE)) {
       db = Object.assign({
         users: [], hosts: [], tokens: {}, keys: [],
-        loginLogs: {}, regEnabled: true, meta: { lastSync: 0 }
+        loginLogs: {}, regEnabled: true, localTerminalEnabled: false, meta: { lastSync: 0 }
       }, JSON.parse(fs.readFileSync(DB_FILE, 'utf8')));
       db.backup = Object.assign(defaultBackupCfg(), db.backup || {});
     }
@@ -576,13 +579,46 @@ app_.get('/admin/stats', requireAdmin, (req, res) => {
     keys: db.keys.filter(k => k.userId === u.id).length,
     lastLogin: (db.loginLogs[u.id] || [])[0] || null
   })).sort((a, b) => (a.role === 'admin' ? -1 : 1) - (b.role === 'admin' ? -1 : 1) || a.createdAt - b.createdAt);
-  res.json({ count: db.users.length, regEnabled: db.regEnabled, users });
+  res.json({ count: db.users.length, regEnabled: db.regEnabled, localTerminalEnabled: db.localTerminalEnabled, users });
 });
 
 app_.post('/admin/registration', requireAdmin, (req, res) => {
   db.regEnabled = !!(req.body || {}).enabled;
   saveDB();
   res.json({ regEnabled: db.regEnabled });
+});
+
+/* --- 本机终端开关（启用需验证本机 SSH 凭据） --- */
+app_.post('/admin/local-terminal', requireAdmin, (req, res) => {
+  const { enabled, password, privateKey, passphrase } = req.body || {};
+  if (!enabled) {
+    db.localTerminalEnabled = false;
+    saveDB();
+    return res.json({ localTerminalEnabled: false });
+  }
+  // 启用：验证本机 SSH 凭据（连接 localhost:22）
+  const cfg = { host: '127.0.0.1', port: 22, username: 'root' };
+  if (privateKey) {
+    cfg.privateKey = privateKey;
+    if (passphrase) cfg.passphrase = passphrase;
+  } else if (password) {
+    cfg.password = password;
+  } else {
+    return res.status(400).json({ error: '请提供本机 SSH 密码或私钥' });
+  }
+  const client = new Client();
+  let verified = false;
+  client.on('ready', () => {
+    verified = true;
+    client.end();
+    db.localTerminalEnabled = true;
+    saveDB();
+    res.json({ localTerminalEnabled: true });
+  });
+  client.on('error', (err) => {
+    if (!verified) res.status(401).json({ error: '本机 SSH 凭据验证失败：' + err.message });
+  });
+  try { client.connect(cfg); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app_.post('/admin/users/:id/delete', requireAdmin, (req, res) => {
@@ -797,20 +833,28 @@ io.on('connection', (socket) => {
 
   function startMonitor(connId, s) {
     clearInterval(s.monitorTimer);
+    const runCmd = (cmd, cb) => {
+      if (s.isLocal) {
+        exec(cmd, { maxBuffer: 1024 * 1024 }, (err, stdout) => cb(err, stdout));
+      } else {
+        s.client.exec(cmd, (err, stream) => {
+          if (err) return cb(err);
+          let out = '';
+          stream.on('data', d => out += d.toString());
+          stream.on('close', () => cb(null, out));
+          stream.stderr.on('data', () => {});
+        });
+      }
+    };
     const tick = () => {
       if (s.closed) return;
-      s.client.exec(MONITOR_CMD, (err, stream) => {
+      runCmd(MONITOR_CMD, (err, out) => {
         if (err || s.closed) return;
-        let out = '';
-        stream.on('data', d => out += d.toString());
-        stream.on('close', () => {
-          try {
-            const data = parseMonitor(out, s.monitorPrev);
-            s.monitorPrev = data.raw;
-            socket.emit('s:monitor', { connId, data });
-          } catch (e) { /* ignore */ }
-        });
-        stream.stderr.on('data', () => {});
+        try {
+          const data = parseMonitor(out, s.monitorPrev);
+          s.monitorPrev = data.raw;
+          socket.emit('s:monitor', { connId, data });
+        } catch (e) { /* ignore */ }
       });
     };
     tick();
@@ -826,6 +870,50 @@ io.on('connection', (socket) => {
     const ctx = getUserByToken(msg.token);
     if (!ctx) {
       return socket.emit('s:ssh:status', { connId, status: 'error', message: '请先登录后再使用 SSH 功能' });
+    }
+
+    // ===== 本地终端（直接访问部署机器本身，无需 SSH） =====
+    if (msg.isLocal) {
+      // 权限校验：仅管理员可用，且站点已开启本机终端
+      if (ctx.user.role !== 'admin') {
+        return socket.emit('s:ssh:status', { connId, status: 'error', message: '仅管理员可使用本机终端' });
+      }
+      if (!db.localTerminalEnabled) {
+        return socket.emit('s:ssh:status', { connId, status: 'error', message: '本机终端未开启，请在站点管理中开启' });
+      }
+      const shell = process.env.SHELL || '/bin/bash';
+      // 统一终端环境，确保字体/颜色/提示符与 SSH 登录体验一致
+      const ptyEnv = Object.assign({}, process.env, {
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+        LANG: process.env.LANG || 'C.UTF-8'
+      });
+      const ptyProc = pty.spawn(shell, ['-l'], {
+        name: 'xterm-256color',
+        cols, rows,
+        cwd: process.env.HOME || '/root',
+        env: ptyEnv
+      });
+      const session = {
+        client: { end: () => { try { ptyProc.kill(); } catch (e) { /* ignore */ } } },
+        stream: ptyProc,
+        sftp: null, sftpLoading: false,
+        monitorTimer: null, monitorPrev: null, closed: false,
+        isLocal: true
+      };
+      conns.set(connId, session);
+      socket.emit('s:ssh:status', { connId, status: 'connecting', message: '正在连接…' });
+
+      ptyProc.onData(d => socket.emit('s:ssh:data', { connId, data: d.toString('utf8') }));
+      ptyProc.onExit(() => {
+        session.closed = true;
+        socket.emit('s:ssh:status', { connId, status: 'closed', message: '连接已关闭' });
+        closeSession(connId);
+      });
+
+      socket.emit('s:ssh:status', { connId, status: 'connected', message: '已连接' });
+      startMonitor(connId, session);
+      return;
     }
 
     let cfg;
@@ -897,7 +985,10 @@ io.on('connection', (socket) => {
   socket.on('c:ssh:resize', ({ connId, cols, rows } = {}) => {
     const s = getSession(connId);
     if (s && s.stream) {
-      try { s.stream.setWindow(rows, cols, 480, 640); } catch (e) { /* ignore */ }
+      try {
+        if (s.isLocal) s.stream.resize(cols, rows);
+        else s.stream.setWindow(rows, cols, 480, 640);
+      } catch (e) { /* ignore */ }
     }
   });
 
@@ -907,6 +998,7 @@ io.on('connection', (socket) => {
   function withSftp(connId, cb) {
     const s = getSession(connId);
     if (!s) return cb(new Error('连接不存在'));
+    if (s.isLocal) return cb(new Error('本机终端暂不支持文件管理'));
     if (s.sftp) return cb(null, s.sftp, s);
     if (s.sftpLoading) return cb(new Error('SFTP 初始化中，请稍候'));
     s.sftpLoading = true;

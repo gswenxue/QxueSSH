@@ -187,6 +187,15 @@ body {
   transition: border-color .15s, background .15s; position: relative;
 }
 .host-item:hover { border-color: var(--accent); background: var(--hover); }
+/* 本机终端：固定置顶、紧凑高度、虚线边框区分 */
+.host-item.host-local {
+  padding: 7px 10px; margin-bottom: 10px;
+  border: 1px dashed var(--accent);
+  background: var(--accent-bg);
+}
+.host-item.host-local:hover { background: var(--accent); }
+.host-item.host-local:hover .h-name { color: #fff; }
+.host-item.host-local .h-name { font-size: 13px; font-weight: 600; }
 .host-item .h-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .host-item .h-addr { color: var(--fg-dim); font-size: 12px; margin-top: 3px; font-family: ui-monospace, monospace; }
 .host-item .h-remark {
@@ -341,6 +350,8 @@ body {
   display: flex; align-items: center; justify-content: center;
   z-index: 100; padding: 16px;
 }
+/* 嵌套弹窗（站点设置内的验证弹窗）需要更高层级 */
+#localTermModal { z-index: 300; }
 .modal-mask.hidden { display: none; }
 .modal {
   width: 420px; max-width: 100%; max-height: 90vh;

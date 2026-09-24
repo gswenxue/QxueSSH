@@ -436,6 +436,12 @@
                   <span>开放站点注册</span>
                 </label>
               </div>
+              <div class="admin-stat">
+                <label class="switch-row">
+                  <input type="checkbox" id="adLocalTermSwitch">
+                  <span>本机终端（仅管理员可见）</span>
+                </label>
+              </div>
             </div>
           </div>
           <div class="pf-section">
@@ -591,6 +597,34 @@
           <input type="text" id="inputValue" placeholder="">
           <div class="form-error hidden" id="inputError"></div>
           <button class="btn btn-primary btn-block" id="btnInputOk">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 本机终端启用验证弹窗 -->
+  <div class="modal-mask hidden" id="localTermModal">
+    <div class="modal modal-sm">
+      <div class="modal-header"><span>启用本机终端 - SSH 凭据验证</span><button class="modal-close" data-close="localTermModal">×</button></div>
+      <div class="modal-body">
+        <p class="tip" style="margin-bottom:12px">启用本机终端需要验证您有本机（127.0.0.1:22）的 SSH 访问权限。验证通过后，仅管理员可在主机列表看到并使用本机终端。</p>
+        <div class="form">
+          <div class="auth-tabs" style="display:flex;gap:8px;margin-bottom:12px">
+            <button type="button" class="btn btn-sm auth-tab active" data-ltauth="password">密码</button>
+            <button type="button" class="btn btn-sm auth-tab" data-ltauth="key">私钥</button>
+          </div>
+          <div id="ltPasswordWrap">
+            <label class="form-label">root 密码</label>
+            <input type="password" id="ltPassword" placeholder="请输入本机 root 密码" autocomplete="off">
+          </div>
+          <div id="ltKeyWrap" class="hidden">
+            <label class="form-label">私钥内容</label>
+            <textarea id="ltPrivateKey" rows="5" placeholder="粘贴 SSH 私钥内容（-----BEGIN ...-----）"></textarea>
+            <label class="form-label" style="margin-top:8px">私钥密码（可选）</label>
+            <input type="password" id="ltPassphrase" placeholder="私钥有密码则填写" autocomplete="off">
+          </div>
+          <div class="form-error hidden" id="ltError"></div>
+          <button class="btn btn-primary btn-block" id="btnLocalTermOk">验证并启用</button>
         </div>
       </div>
     </div>
