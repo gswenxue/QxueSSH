@@ -57,9 +57,10 @@ $('#btnConfirmOk').addEventListener('click', () => {
 
 /* 输入对话框 */
 let inputCb = null;
-function inputDlg(title, placeholder, value, cb) {
+function inputDlg(title, placeholder, value, cb, type) {
   $('#inputTitle').textContent = title;
   const inp = $('#inputValue');
+  inp.type = type || 'text';
   inp.value = value || '';
   inp.placeholder = placeholder || '';
   hideEl('inputError');
@@ -2184,6 +2185,8 @@ async function loadBackupCfg() {
     $('#bkUser').value = backupCfg.username || '';
     $('#bkPass').value = '';
     $('#bkPass').placeholder = backupCfg.hasPassword ? '已保存（留空表示不修改）' : '坚果云等请使用「应用密码」';
+    $('#bkBackupPass').value = '';
+    $('#bkBackupPass').placeholder = backupCfg.hasBackupPassword ? '已设置（留空表示不修改）' : '设置后自动备份将用此密码加密';
     $('#bkInterval').value = backupCfg.intervalHours || 24;
     $('#bkRetention').value = backupCfg.retention || 5;
     renderBackupStatus();
@@ -2218,6 +2221,7 @@ function readBackupForm() {
     webdavUrl: $('#bkUrl').value.trim(),
     username: $('#bkUser').value.trim(),
     password: $('#bkPass').value,
+    backupPassword: $('#bkBackupPass').value,
     intervalHours: +$('#bkInterval').value || 24,
     retention: +$('#bkRetention').value || 5
   };
@@ -2260,12 +2264,20 @@ $('#btnBkRun').addEventListener('click', async () => {
   } catch (e) { toast('备份失败：' + e.message, 'err'); await loadBackupCfg(); }
 });
 
-// 下载备份
+// 下载备份（需输入管理员密码加密）
 $('#btnBkDownload').addEventListener('click', () => {
-  toast('正在生成备份…');
-  fetch('/api/admin/backup/download', { headers: { 'Authorization': 'Bearer ' + state.token } })
-    .then(r => {
-      if (!r.ok) throw new Error('下载失败');
+  inputDlg('下载备份', '请输入当前管理员密码', '', (password) => {
+    toast('正在生成加密备份…');
+    fetch('/api/admin/backup/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ adminPassword: password })
+    })
+    .then(async r => {
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || '下载失败');
+      }
       return r.blob();
     })
     .then(blob => {
@@ -2275,9 +2287,10 @@ $('#btnBkDownload').addEventListener('click', () => {
       a.download = 'qxuessh-backup-' + new Date().toISOString().slice(0,10) + '.tar.gz';
       a.click();
       URL.revokeObjectURL(url);
-      toast('备份已下载', 'ok');
+      toast('加密备份已下载，请牢记密码', 'ok');
     })
     .catch(e => toast('下载失败：' + e.message, 'err'));
+  }, 'password');
 });
 
 // 数据导入

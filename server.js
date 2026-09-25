@@ -60,6 +60,46 @@ function decryptDB(encStr) {
   }
 }
 
+/* ---------------- 备份文件加密（PBKDF2 派生密钥，AES-256-GCM） ---------------- */
+const BACKUP_ITERATIONS = 100000;
+
+// 用管理员密码派生密钥加密备份内容
+function encryptBackup(jsonStr, password) {
+  const salt = crypto.randomBytes(16);
+  const key = crypto.pbkdf2Sync(password, salt, BACKUP_ITERATIONS, 32, 'sha256');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(jsonStr, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({
+    v: 2, enc: 'pbkdf2',
+    salt: salt.toString('base64'),
+    iter: BACKUP_ITERATIONS,
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    data: enc.toString('base64')
+  });
+}
+
+// 用管理员密码解密备份内容，失败返回 null
+function decryptBackup(encStr, password) {
+  try {
+    const obj = JSON.parse(encStr);
+    if (!obj || obj.v !== 2 || obj.enc !== 'pbkdf2') return null;
+    const salt = Buffer.from(obj.salt, 'base64');
+    const key = crypto.pbkdf2Sync(password, salt, obj.iter || BACKUP_ITERATIONS, 32, 'sha256');
+    const iv = Buffer.from(obj.iv, 'base64');
+    const tag = Buffer.from(obj.tag, 'base64');
+    const data = Buffer.from(obj.data, 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const dec = Buffer.concat([decipher.update(data), decipher.final()]);
+    return dec.toString('utf8');
+  } catch (e) {
+    return null;
+  }
+}
+
 /* ---------------- 安全策略常量 ---------------- */
 const TOKEN_TTL = 3 * 24 * 60 * 60 * 1000;        // token 有效期 3 天
 const TOKEN_RENEW_THRESHOLD = 24 * 60 * 60 * 1000; // 剩余不足 1 天时自动续期
@@ -77,6 +117,7 @@ function defaultBackupCfg() {
     webdavUrl: '',         // WebDAV 地址（如 https://dav.jianguoyun.com/dav/QxueSSH/）
     username: '',          // WebDAV 账号
     password: '',          // WebDAV 密码 / 应用密码
+    backupPassword: '',    // 备份加密密码（用于自动备份加密）
     intervalHours: 24,     // 备份间隔（小时）
     retention: 5,          // 本地保留份数
     lastBackup: null,      // 上次成功备份时间
@@ -729,8 +770,8 @@ function webdavTest() {
   });
 }
 
-/* 打包备份：仅 data/db.json（明文导出，便于跨机器迁移） */
-function buildBackupArchive() {
+/* 打包备份：仅 data/db.json（用管理员密码派生密钥加密，PBKDF2+AES-256-GCM） */
+function buildBackupArchive(password) {
   return new Promise((resolve, reject) => {
     try {
       // 先同步落盘数据库，确保内存数据最新
@@ -741,12 +782,15 @@ function buildBackupArchive() {
       const p = n => String(n).padStart(2, '0');
       const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
       const file = path.join(BACKUP_DIR, `qxuessh-backup-${stamp}.tar.gz`);
-      // 创建临时目录，导出明文 db.json（备份文件由用户保管，明文便于跨机器导入）
+      // 创建临时目录，导出加密的 db.json
       const os = require('os');
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qxue-backup-'));
       const tmpDataDir = path.join(tmpDir, 'data');
       fs.mkdirSync(tmpDataDir, { recursive: true });
-      fs.writeFileSync(path.join(tmpDataDir, 'db.json'), JSON.stringify(db, null, 2));
+      const dbContent = password
+        ? encryptBackup(JSON.stringify(db, null, 2), password)
+        : JSON.stringify(db, null, 2);
+      fs.writeFileSync(path.join(tmpDataDir, 'db.json'), dbContent);
       execFile('tar', ['czf', file, 'data/db.json'],
         { cwd: tmpDir }, (err) => {
           fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -794,7 +838,8 @@ async function runBackup(trigger) {
   const cfg = db.backup;
   let entry;
   try {
-    const file = await buildBackupArchive();
+    if (!cfg.backupPassword) throw new Error('请先在备份设置中配置备份加密密码');
+    const file = await buildBackupArchive(cfg.backupPassword);
     await webdavPut(file);
     cfg.lastBackup = Date.now();
     cfg.lastError = null;
@@ -826,7 +871,8 @@ app_.get('/admin/backup', requireAdmin, (req, res) => {
   const c = db.backup;
   res.json({
     enabled: c.enabled, webdavUrl: c.webdavUrl, username: c.username,
-    hasPassword: !!c.password, intervalHours: c.intervalHours, retention: c.retention,
+    hasPassword: !!c.password, hasBackupPassword: !!c.backupPassword,
+    intervalHours: c.intervalHours, retention: c.retention,
     lastBackup: c.lastBackup, lastError: c.lastError, log: c.log
   });
 });
@@ -840,6 +886,9 @@ app_.post('/admin/backup', requireAdmin, (req, res) => {
   // 密码留空 = 沿用旧密码
   if (typeof b.password === 'string' && b.password !== '') c.password = b.password;
   if (b.clearPassword) c.password = '';
+  // 备份加密密码（用于自动备份）
+  if (typeof b.backupPassword === 'string' && b.backupPassword !== '') c.backupPassword = b.backupPassword;
+  if (b.clearBackupPassword) c.backupPassword = '';
   c.intervalHours = Math.min(720, Math.max(1, +b.intervalHours || 24));
   c.retention = Math.min(30, Math.max(1, +b.retention || 5));
   saveDB();
@@ -859,9 +908,16 @@ app_.post('/admin/backup/run', requireAdmin, async (req, res) => {
 });
 
 // 下载最新备份
-app_.get('/admin/backup/download', requireAdmin, async (req, res) => {
+app_.post('/admin/backup/download', requireAdmin, express.json(), async (req, res) => {
   try {
-    const file = await buildBackupArchive();
+    const { adminPassword } = req.body || {};
+    if (!adminPassword) return res.status(400).json({ error: '请输入管理员密码' });
+    // 验证当前管理员密码
+    const admin = db.users.find(u => u.role === 'admin');
+    if (!admin || !bcrypt.compareSync(adminPassword, admin.passHash)) {
+      return res.status(401).json({ error: '管理员密码错误' });
+    }
+    const file = await buildBackupArchive(adminPassword);
     res.download(file, path.basename(file));
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -871,20 +927,27 @@ app_.get('/admin/backup/download', requireAdmin, async (req, res) => {
 // 导入尝试记录（token -> {count, lockUntil}）
 const importAttempts = new Map();
 
-// 解析备份文件内容，返回 db 对象
-function parseBackupFile(buffer) {
+// 解析备份文件内容，返回 db 对象；password 用于解密 PBKDF2 加密的备份
+function parseBackupFile(buffer, password) {
   const parseJson = (raw) => {
-    // 检测是否为加密格式（含 v/iv/tag/data 字段）
+    // 检测加密格式
     try {
       const obj = JSON.parse(raw);
-      if (obj && obj.v && obj.iv && obj.tag && obj.data) {
-        // 是加密格式，尝试解密
+      if (obj && obj.v === 2 && obj.enc === 'pbkdf2') {
+        // 备份文件加密格式（PBKDF2+管理员密码）
+        if (!password) throw new Error('该备份已加密，请输入管理员密码');
+        const dec = decryptBackup(raw, password);
+        if (dec === null) throw new Error('__PASSWORD_WRONG__');
+        raw = dec;
+      } else if (obj && obj.v === 1 && obj.iv && obj.tag && obj.data && !obj.enc) {
+        // 本机数据库加密格式（用 data/.key 解密）
         const dec = decryptDB(raw);
-        if (dec === null) throw new Error('备份文件已加密，无法在本机解密（请在原机器上导出，或使用明文备份）');
+        if (dec === null) throw new Error('备份文件已加密，无法在本机解密');
         raw = dec;
       }
     } catch (e) {
-      if (e.message.includes('加密')) throw e;
+      if (e.message === '__PASSWORD_WRONG__') throw e;
+      if (e.message && e.message.includes('加密')) throw e;
       // 不是 JSON 或不是加密格式，继续
     }
     const result = JSON.parse(raw);
@@ -901,7 +964,6 @@ function parseBackupFile(buffer) {
     const tmpFile = path.join(tmpDir, 'backup.tar.gz');
     fs.writeFileSync(tmpFile, buffer);
     execFileSync('tar', ['xzf', tmpFile, '-C', tmpDir]);
-    // 查找 db.json（可能在 data/ 下或根目录）
     const candidates = [
       path.join(tmpDir, 'data', 'db.json'),
       path.join(tmpDir, 'db.json')
@@ -915,6 +977,7 @@ function parseBackupFile(buffer) {
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch (e) {
+    if (e.message === '__PASSWORD_WRONG__') throw e;
     if (e.message && (e.message.includes('加密') || e.message.includes('格式错误'))) throw e;
     // 不是 tar.gz，继续尝试纯 JSON
   }
@@ -922,6 +985,7 @@ function parseBackupFile(buffer) {
   try {
     return parseJson(buffer.toString('utf8'));
   } catch (e) {
+    if (e.message === '__PASSWORD_WRONG__') throw e;
     if (e.message && (e.message.includes('加密') || e.message.includes('格式错误'))) throw e;
     throw new Error('无法解析备份文件格式');
   }
@@ -945,8 +1009,20 @@ app_.post('/admin/import', requireAdmin, express.json({ limit: '20mb' }), (req, 
   let backupData;
   try {
     const buffer = Buffer.from(fileB64, 'base64');
-    backupData = parseBackupFile(buffer);
+    backupData = parseBackupFile(buffer, adminPassword);
   } catch (e) {
+    // 密码错误：计入失败次数
+    if (e.message === '__PASSWORD_WRONG__') {
+      const cur = importAttempts.get(token) || { count: 0 };
+      cur.count++;
+      if (cur.count >= 3) {
+        cur.lockUntil = Date.now() + 100 * 365 * 24 * 60 * 60 * 1000; // 永久锁定（100年）
+        importAttempts.set(token, cur);
+        return res.status(403).json({ error: '当前环境可能存在风险，为保护数据安全，本机禁止该数据导入' });
+      }
+      importAttempts.set(token, cur);
+      return res.status(401).json({ error: `管理员密码错误（还可尝试 ${3 - cur.count} 次）` });
+    }
     return res.status(400).json({ error: '备份文件解析失败: ' + e.message });
   }
 
@@ -956,20 +1032,7 @@ app_.post('/admin/import', requireAdmin, express.json({ limit: '20mb' }), (req, 
     return res.status(400).json({ error: '备份文件中未找到管理员账户' });
   }
 
-  // 验证旧管理员密码
-  if (!bcrypt.compareSync(adminPassword, backupAdmin.passHash)) {
-    const cur = importAttempts.get(token) || { count: 0 };
-    cur.count++;
-    if (cur.count >= 3) {
-      cur.lockUntil = Date.now() + 100 * 365 * 24 * 60 * 60 * 1000; // 永久锁定（100年）
-      importAttempts.set(token, cur);
-      return res.status(403).json({ error: '当前环境可能存在风险，为保护数据安全，本机禁止该数据导入' });
-    }
-    importAttempts.set(token, cur);
-    return res.status(401).json({ error: `旧管理员密码错误（还可尝试 ${3 - cur.count} 次）` });
-  }
-
-  // 验证成功，清除尝试记录
+  // 解密成功即密码验证通过，清除尝试记录
   importAttempts.delete(token);
 
   // 合并数据：保留当前站点管理员，导入其他数据
