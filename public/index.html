@@ -507,12 +507,15 @@
         <button class="modal-close" data-close="importModal">×</button>
       </div>
       <div class="modal-body">
-        <p class="tip">选择备份文件（.tar.gz 或 .json），输入旧站点管理员密码验证后导入。当前站点管理员保留，旧管理员的主机/密钥将归属当前管理员。</p>
+        <p class="tip">选择或拖拽备份文件（.tar.gz 或 .json），输入旧站点管理员密码验证后导入。当前站点管理员保留，旧管理员的主机/密钥将归属当前管理员。</p>
         <label>备份文件</label>
-        <input type="file" id="importFile" accept=".tar.gz,.json,.gz">
+        <div id="importDropZone" class="drop-zone">
+          <div class="drop-zone-text">📁 点击选择或拖拽文件到此处</div>
+          <input type="file" id="importFile" accept=".tar.gz,.json,.gz" style="display:none">
+        </div>
         <div id="importFileInfo" class="tip" style="margin:6px 0"></div>
         <label>旧站点管理员密码</label>
-        <input type="password" id="importAdminPass" placeholder="输入备份文件中管理员的密码">
+        <input type="password" id="importAdminPass">
         <button class="btn btn-primary btn-block" id="btnImportOk" style="margin-top:12px">开始导入</button>
         <div id="importResult" style="margin-top:10px"></div>
       </div>

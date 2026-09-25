@@ -357,6 +357,23 @@ body {
 /* 嵌套弹窗（站点设置内的验证弹窗）需要更高层级 */
 #localTermModal { z-index: 300; }
 #importModal { z-index: 300; }
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 24px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg2);
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.drop-zone-text {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
 .modal-mask.hidden { display: none; }
 .modal {
   width: 420px; max-width: 100%; max-height: 90vh;

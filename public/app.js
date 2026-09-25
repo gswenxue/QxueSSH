@@ -2288,11 +2288,11 @@ $('#btnImportOpen').addEventListener('click', () => {
   $('#importFileInfo').textContent = '';
   $('#importAdminPass').value = '';
   $('#importResult').innerHTML = '';
+  $('#importDropZone').classList.remove('drag-over');
   showEl('importModal');
 });
 
-$('#importFile').addEventListener('change', (e) => {
-  const f = e.target.files[0];
+function handleImportFile(f) {
   if (!f) return;
   if (f.size > 15 * 1024 * 1024) {
     $('#importFileInfo').textContent = '文件过大（超过15MB）';
@@ -2305,6 +2305,32 @@ $('#importFile').addEventListener('change', (e) => {
     $('#importFileInfo').textContent = `已选择：${f.name}（${fmtBytes(f.size)}）`;
   };
   reader.readAsArrayBuffer(f);
+}
+
+$('#importFile').addEventListener('change', (e) => handleImportFile(e.target.files[0]));
+
+// 点击拖拽区域打开文件选择
+$('#importDropZone').addEventListener('click', () => $('#importFile').click());
+
+// 拖拽上传
+const dropZone = $('#importDropZone');
+['dragenter', 'dragover'].forEach(ev => {
+  dropZone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.add('drag-over');
+  });
+});
+['dragleave', 'drop'].forEach(ev => {
+  dropZone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.remove('drag-over');
+  });
+});
+dropZone.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files[0];
+  if (f) handleImportFile(f);
 });
 
 $('#btnImportOk').addEventListener('click', async () => {
