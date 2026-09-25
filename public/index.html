@@ -442,6 +442,12 @@
                   <span>本机终端（仅管理员可见）</span>
                 </label>
               </div>
+              <div class="admin-stat">
+                <label class="switch-row">
+                  <input type="checkbox" id="adHideAddrSwitch">
+                  <span>隐藏主机IP及端口（悬停显示）</span>
+                </label>
+              </div>
             </div>
           </div>
           <div class="pf-section">
@@ -607,8 +613,10 @@
     <div class="modal modal-sm">
       <div class="modal-header"><span>启用本机终端 - SSH 凭据验证</span><button class="modal-close" data-close="localTermModal">×</button></div>
       <div class="modal-body">
-        <p class="tip" style="margin-bottom:12px">启用本机终端需要验证您有本机（127.0.0.1:22）的 SSH 访问权限。验证通过后，仅管理员可在主机列表看到并使用本机终端。</p>
+        <p class="tip" style="margin-bottom:12px">启用本机终端需要验证您有本机（127.0.0.1）的 SSH 访问权限。验证通过后，仅管理员可在主机列表看到并使用本机终端。</p>
         <div class="form">
+          <label class="form-label">SSH 端口</label>
+          <input type="number" id="ltPort" value="22" min="1" max="65535" placeholder="默认 22" style="margin-bottom:12px">
           <div class="auth-tabs" style="display:flex;gap:8px;margin-bottom:12px">
             <button type="button" class="btn btn-sm auth-tab active" data-ltauth="password">密码</button>
             <button type="button" class="btn btn-sm auth-tab" data-ltauth="key">私钥</button>

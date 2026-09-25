@@ -88,6 +88,8 @@ const state = {
   token: localStorage.getItem('qxue_token') || null,
   user: null,
   hosts: [],
+  localTerminalEnabled: false,
+  hideHostAddr: false,
   conns: new Map(),      // connId -> {term, fit, box, tabEl, status, label, monitor, hostId}
   activeConnId: null,
   fileConnId: null,      // 文件面板绑定的连接
@@ -330,17 +332,25 @@ function renderHosts() {
   if (!state.hosts.length) {
     html += '<div class="empty-hint">' + (state.user ? '还没有保存的主机，点击「+ 新增」添加一台吧' : '未登录，无保存数据') + '</div>';
   } else {
-    html += state.hosts.map(h => `
-    <div class="host-item" data-id="${h.id}">
-      <div class="h-name">${escapeHtml(h.label)} <span class="h-badge">${h.port === 22 ? '22' : h.port}</span></div>
-      <div class="h-addr">${escapeHtml(h.username)}@${escapeHtml(h.host)}</div>
+    html += state.hosts.map(h => {
+      const addrText = `${h.username}@${h.host}:${h.port}`;
+      const itemTitle = state.hideHostAddr ? `主机: ${h.label}\n${addrText}${h.remark ? '\n备注: ' + h.remark : ''}` : (h.remark || '');
+      const badgeHtml = state.hideHostAddr ? '' : ` <span class="h-badge">${h.port === 22 ? '22' : h.port}</span>`;
+      const addrHtml = state.hideHostAddr
+        ? `<div class="h-addr h-addr-hidden" title="${addrText}">🔒 地址已隐藏（悬停查看）</div>`
+        : `<div class="h-addr">${escapeHtml(h.username)}@${escapeHtml(h.host)}</div>`;
+      return `
+    <div class="host-item" data-id="${h.id}" title="${escapeHtml(itemTitle)}">
+      <div class="h-name">${escapeHtml(h.label)}${badgeHtml}</div>
+      ${addrHtml}
       ${h.remark ? `<div class="h-remark" title="${escapeHtml(h.remark)}">📝 ${escapeHtml(h.remark)}</div>` : ''}
       <div class="h-actions">
         <button class="move" title="移动排序">⇅</button>
         <button class="edit" title="编辑">✎</button>
         <button class="del" title="删除">🗑</button>
       </div>
-    </div>`).join('');
+    </div>`;
+    }).join('');
   }
   list.innerHTML = html;
 
@@ -1657,7 +1667,10 @@ $('#btnPasteOk').addEventListener('click', () => {
   const c = activeTerm();
   const text = $('#pasteArea').value;
   hideEl('pasteModal');
-  if (c && c.status === 'connected' && text) c.term.paste(text);
+  if (c && c.status === 'connected' && text) {
+    c.term.paste(text);
+    c.term.focus();
+  }
 });
 
 // 终端右键：有选中则复制，无选中则粘贴
@@ -2149,7 +2162,9 @@ async function loadAdminStats() {
     $('#adHostCount').textContent = s.users.reduce((a, u) => a + u.hosts, 0);
     $('#adRegSwitch').checked = s.regEnabled;
     $('#adLocalTermSwitch').checked = !!s.localTerminalEnabled;
+    $('#adHideAddrSwitch').checked = !!s.hideHostAddr;
     state.localTerminalEnabled = !!s.localTerminalEnabled;
+    state.hideHostAddr = !!s.hideHostAddr;
     adminUsers = s.users;
     const totalPages = Math.max(1, Math.ceil(adminUsers.length / ADMIN_PAGE_SIZE));
     if (adminPage > totalPages) adminPage = totalPages;
@@ -2308,6 +2323,18 @@ $('#adRegSwitch').addEventListener('change', async (e) => {
   }
 });
 
+$('#adHideAddrSwitch').addEventListener('change', async (e) => {
+  try {
+    const r = await api('/admin/settings', { method: 'POST', body: { hideHostAddr: e.target.checked } });
+    state.hideHostAddr = r.hideHostAddr;
+    renderHosts();
+    toast(r.hideHostAddr ? '已隐藏主机IP及端口' : '已显示主机IP及端口', 'ok');
+  } catch (err2) {
+    e.target.checked = !e.target.checked;
+    toast(err2.message, 'err');
+  }
+});
+
 /* --- 本机终端开关 --- */
 let ltAuthType = 'password';
 $$('#localTermModal [data-ltauth]').forEach(btn => {
@@ -2340,12 +2367,15 @@ $('#adLocalTermSwitch').addEventListener('change', async (e) => {
   $('#ltPassword').value = '';
   $('#ltPrivateKey').value = '';
   $('#ltPassphrase').value = '';
+  $('#ltPort').value = '22';
   $('#ltError').classList.add('hidden');
   showEl('localTermModal');
 });
 
 $('#btnLocalTermOk').addEventListener('click', async () => {
   const body = { enabled: true };
+  const port = parseInt($('#ltPort').value);
+  if (port >= 1 && port <= 65535) body.port = port;
   if (ltAuthType === 'password') {
     body.password = $('#ltPassword').value;
     if (!body.password) { $('#ltError').textContent = '请输入密码'; $('#ltError').classList.remove('hidden'); return; }

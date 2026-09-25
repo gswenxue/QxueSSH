@@ -48,6 +48,7 @@ let db = {
   users: [], hosts: [], tokens: {}, keys: [],
   loginLogs: {},          // userId -> [{time, ip, ua}]
   regEnabled: true,       // 站点注册开关
+  hideHostAddr: false,    // 隐藏主机IP及端口（悬停显示）
   localTerminalEnabled: false, // 本机终端开关（仅管理员可见可用）
   meta: { lastSync: 0 },  // 云端数据最新同步时间
   backup: defaultBackupCfg()
@@ -58,7 +59,7 @@ function loadDB() {
     if (fs.existsSync(DB_FILE)) {
       db = Object.assign({
         users: [], hosts: [], tokens: {}, keys: [],
-        loginLogs: {}, regEnabled: true, localTerminalEnabled: false, meta: { lastSync: 0 }
+        loginLogs: {}, regEnabled: true, hideHostAddr: false, localTerminalEnabled: false, meta: { lastSync: 0 }
       }, JSON.parse(fs.readFileSync(DB_FILE, 'utf8')));
       db.backup = Object.assign(defaultBackupCfg(), db.backup || {});
     }
@@ -579,7 +580,7 @@ app_.get('/admin/stats', requireAdmin, (req, res) => {
     keys: db.keys.filter(k => k.userId === u.id).length,
     lastLogin: (db.loginLogs[u.id] || [])[0] || null
   })).sort((a, b) => (a.role === 'admin' ? -1 : 1) - (b.role === 'admin' ? -1 : 1) || a.createdAt - b.createdAt);
-  res.json({ count: db.users.length, regEnabled: db.regEnabled, localTerminalEnabled: db.localTerminalEnabled, users });
+  res.json({ count: db.users.length, regEnabled: db.regEnabled, hideHostAddr: db.hideHostAddr, localTerminalEnabled: db.localTerminalEnabled, users });
 });
 
 app_.post('/admin/registration', requireAdmin, (req, res) => {
@@ -588,16 +589,25 @@ app_.post('/admin/registration', requireAdmin, (req, res) => {
   res.json({ regEnabled: db.regEnabled });
 });
 
+/* --- 通用设置（隐藏主机IP端口等） --- */
+app_.post('/admin/settings', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (typeof b.hideHostAddr === 'boolean') db.hideHostAddr = b.hideHostAddr;
+  saveDB();
+  res.json({ hideHostAddr: db.hideHostAddr });
+});
+
 /* --- 本机终端开关（启用需验证本机 SSH 凭据） --- */
 app_.post('/admin/local-terminal', requireAdmin, (req, res) => {
-  const { enabled, password, privateKey, passphrase } = req.body || {};
+  const { enabled, password, privateKey, passphrase, port } = req.body || {};
   if (!enabled) {
     db.localTerminalEnabled = false;
     saveDB();
     return res.json({ localTerminalEnabled: false });
   }
-  // 启用：验证本机 SSH 凭据（连接 localhost:22）
-  const cfg = { host: '127.0.0.1', port: 22, username: 'root' };
+  // 启用：验证本机 SSH 凭据（连接 localhost:指定端口，默认22）
+  const sshPort = parseInt(port) || 22;
+  const cfg = { host: '127.0.0.1', port: sshPort, username: 'root' };
   if (privateKey) {
     cfg.privateKey = privateKey;
     if (passphrase) cfg.passphrase = passphrase;
