@@ -89,7 +89,6 @@ const state = {
   user: null,
   hosts: [],
   localTerminalEnabled: false,
-  hideHostAddr: false,
   conns: new Map(),      // connId -> {term, fit, box, tabEl, status, label, monitor, hostId}
   activeConnId: null,
   fileConnId: null,      // 文件面板绑定的连接
@@ -105,7 +104,8 @@ const state = {
     quickKeys: localStorage.getItem('qxue_quickkeys') !== null
       ? localStorage.getItem('qxue_quickkeys') === '1'
       : (window.matchMedia('(pointer: coarse)').matches || window.innerWidth <= 768),
-    monitorBar: localStorage.getItem('qxue_monitorbar') !== '0'
+    monitorBar: localStorage.getItem('qxue_monitorbar') !== '0',
+    hideAddr: localStorage.getItem('qxue_hideaddr') === '1'
   }
 };
 
@@ -181,6 +181,7 @@ function applySettings() {
   $('#fontSizeVal').textContent = state.settings.fontSize;
   $('#setQuickKeys').checked = state.settings.quickKeys;
   $('#setMonitorBar').checked = state.settings.monitorBar;
+  $('#setHideAddr').checked = state.settings.hideAddr;
   $('#quickKeysBar').classList.toggle('hidden', !state.settings.quickKeys);
   $('#monitorBar').classList.toggle('hidden', !state.settings.monitorBar);
 }
@@ -333,16 +334,14 @@ function renderHosts() {
     html += '<div class="empty-hint">' + (state.user ? '还没有保存的主机，点击「+ 新增」添加一台吧' : '未登录，无保存数据') + '</div>';
   } else {
     html += state.hosts.map(h => {
+      const hide = state.settings.hideAddr;
       const addrText = `${h.username}@${h.host}:${h.port}`;
-      const itemTitle = state.hideHostAddr ? `主机: ${h.label}\n${addrText}${h.remark ? '\n备注: ' + h.remark : ''}` : (h.remark || '');
-      const badgeHtml = state.hideHostAddr ? '' : ` <span class="h-badge">${h.port === 22 ? '22' : h.port}</span>`;
-      const addrHtml = state.hideHostAddr
-        ? `<div class="h-addr h-addr-hidden" title="${addrText}">🔒 地址已隐藏（悬停查看）</div>`
-        : `<div class="h-addr">${escapeHtml(h.username)}@${escapeHtml(h.host)}</div>`;
+      const badgeCls = hide ? 'h-badge h-badge-hidden' : 'h-badge';
+      const addrCls = hide ? 'h-addr h-addr-hidden' : 'h-addr';
       return `
-    <div class="host-item" data-id="${h.id}" title="${escapeHtml(itemTitle)}">
-      <div class="h-name">${escapeHtml(h.label)}${badgeHtml}</div>
-      ${addrHtml}
+    <div class="host-item" data-id="${h.id}" title="${hide ? escapeHtml(addrText) : (h.remark ? escapeHtml(h.remark) : '')}">
+      <div class="h-name">${escapeHtml(h.label)} <span class="${badgeCls}">${h.port === 22 ? '22' : h.port}</span></div>
+      <div class="${addrCls}">${escapeHtml(h.username)}@${escapeHtml(h.host)}</div>
       ${h.remark ? `<div class="h-remark" title="${escapeHtml(h.remark)}">📝 ${escapeHtml(h.remark)}</div>` : ''}
       <div class="h-actions">
         <button class="move" title="移动排序">⇅</button>
@@ -2162,9 +2161,7 @@ async function loadAdminStats() {
     $('#adHostCount').textContent = s.users.reduce((a, u) => a + u.hosts, 0);
     $('#adRegSwitch').checked = s.regEnabled;
     $('#adLocalTermSwitch').checked = !!s.localTerminalEnabled;
-    $('#adHideAddrSwitch').checked = !!s.hideHostAddr;
     state.localTerminalEnabled = !!s.localTerminalEnabled;
-    state.hideHostAddr = !!s.hideHostAddr;
     adminUsers = s.users;
     const totalPages = Math.max(1, Math.ceil(adminUsers.length / ADMIN_PAGE_SIZE));
     if (adminPage > totalPages) adminPage = totalPages;
@@ -2317,18 +2314,6 @@ $('#adRegSwitch').addEventListener('change', async (e) => {
   try {
     const r = await api('/admin/registration', { method: 'POST', body: { enabled: e.target.checked } });
     toast(r.regEnabled ? '已开启站点注册' : '已关闭站点注册', 'ok');
-  } catch (err2) {
-    e.target.checked = !e.target.checked;
-    toast(err2.message, 'err');
-  }
-});
-
-$('#adHideAddrSwitch').addEventListener('change', async (e) => {
-  try {
-    const r = await api('/admin/settings', { method: 'POST', body: { hideHostAddr: e.target.checked } });
-    state.hideHostAddr = r.hideHostAddr;
-    renderHosts();
-    toast(r.hideHostAddr ? '已隐藏主机IP及端口' : '已显示主机IP及端口', 'ok');
   } catch (err2) {
     e.target.checked = !e.target.checked;
     toast(err2.message, 'err');
@@ -2503,6 +2488,11 @@ $('#setMonitorBar').addEventListener('change', e => {
   state.settings.monitorBar = e.target.checked;
   localStorage.setItem('qxue_monitorbar', e.target.checked ? '1' : '0');
   $('#monitorBar').classList.toggle('hidden', !e.target.checked);
+});
+$('#setHideAddr').addEventListener('change', e => {
+  state.settings.hideAddr = e.target.checked;
+  localStorage.setItem('qxue_hideaddr', e.target.checked ? '1' : '0');
+  renderHosts();
 });
 
 /* ---------------- 快捷键条：桌面端鼠标拖拽 / 滚轮横向滚动 ---------------- */
