@@ -738,7 +738,8 @@ function buildBackupArchive() {
       const p = n => String(n).padStart(2, '0');
       const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
       const file = path.join(BACKUP_DIR, `qxuessh-backup-${stamp}.tar.gz`);
-      execFile('tar', ['czf', file, 'server.js', 'package.json', 'public', 'data/db.json'],
+      // 只备份重要数据 db.json，不打包整站代码
+      execFile('tar', ['czf', file, 'data/db.json'],
         { cwd: __dirname }, (err) => {
           if (err) return reject(new Error('打包失败: ' + err.message));
           resolve(file);
@@ -846,6 +847,156 @@ app_.post('/admin/backup/run', requireAdmin, async (req, res) => {
   const entry = await runBackup('manual');
   if (!entry.ok) return res.status(400).json({ error: entry.error });
   res.json({ ok: true, entry });
+});
+
+// 下载最新备份
+app_.get('/admin/backup/download', requireAdmin, async (req, res) => {
+  try {
+    const file = await buildBackupArchive();
+    res.download(file, path.basename(file));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// 导入尝试记录（token -> {count, lockUntil}）
+const importAttempts = new Map();
+
+// 解析备份文件内容，返回 db 对象
+function parseBackupFile(buffer) {
+  // 尝试作为 tar.gz 解压
+  try {
+    const { execFileSync } = require('child_process');
+    const tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'qxue-import-'));
+    const tmpFile = path.join(tmpDir, 'backup.tar.gz');
+    fs.writeFileSync(tmpFile, buffer);
+    execFileSync('tar', ['xzf', tmpFile, '-C', tmpDir]);
+    // 查找 db.json（可能在 data/ 下或根目录）
+    const candidates = [
+      path.join(tmpDir, 'data', 'db.json'),
+      path.join(tmpDir, 'db.json')
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        let raw = fs.readFileSync(p, 'utf8');
+        const dec = decryptDB(raw);
+        if (dec !== null) raw = dec;
+        const result = JSON.parse(raw);
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        return result;
+      }
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch (e) { /* 不是 tar.gz，继续尝试纯 JSON */ }
+  // 尝试作为纯 JSON
+  try {
+    let raw = buffer.toString('utf8');
+    const dec = decryptDB(raw);
+    if (dec !== null) raw = dec;
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new Error('无法解析备份文件格式');
+  }
+}
+
+// 数据导入
+app_.post('/admin/import', requireAdmin, express.json({ limit: '20mb' }), (req, res) => {
+  const token = req.token;
+  const { fileB64, adminPassword } = req.body || {};
+
+  // 检查锁定
+  const att = importAttempts.get(token);
+  if (att && att.lockUntil && Date.now() < att.lockUntil) {
+    return res.status(403).json({ error: '导入尝试次数过多，已锁定15分钟，请稍后再试' });
+  }
+
+  if (!fileB64 || !adminPassword) {
+    return res.status(400).json({ error: '缺少备份文件或管理员密码' });
+  }
+
+  let backupData;
+  try {
+    const buffer = Buffer.from(fileB64, 'base64');
+    backupData = parseBackupFile(buffer);
+  } catch (e) {
+    return res.status(400).json({ error: '备份文件解析失败: ' + e.message });
+  }
+
+  // 找到备份中的管理员
+  const backupAdmin = (backupData.users || []).find(u => u.role === 'admin');
+  if (!backupAdmin) {
+    return res.status(400).json({ error: '备份文件中未找到管理员账户' });
+  }
+
+  // 验证旧管理员密码
+  if (!bcrypt.compareSync(adminPassword, backupAdmin.passHash)) {
+    const cur = importAttempts.get(token) || { count: 0 };
+    cur.count++;
+    if (cur.count >= 3) {
+      cur.lockUntil = Date.now() + 15 * 60 * 1000;
+      importAttempts.set(token, cur);
+      return res.status(403).json({ error: '管理员密码验证失败3次，导入功能已锁定15分钟' });
+    }
+    importAttempts.set(token, cur);
+    return res.status(401).json({ error: `旧管理员密码错误（还可尝试 ${3 - cur.count} 次）` });
+  }
+
+  // 验证成功，清除尝试记录
+  importAttempts.delete(token);
+
+  // 合并数据：保留当前站点管理员，导入其他数据
+  const currentAdmin = db.users.find(u => u.role === 'admin');
+  const currentAdminId = currentAdmin ? currentAdmin.id : null;
+
+  // 导入用户（跳过当前管理员，其他用户如果用户名冲突则跳过）
+  const existingUsernames = new Set(db.users.map(u => u.username));
+  let importedUsers = 0;
+  for (const u of (backupData.users || [])) {
+    if (u.role === 'admin') continue; // 不导入旧管理员
+    if (existingUsernames.has(u.username)) continue; // 用户名冲突跳过
+    db.users.push(u);
+    existingUsernames.add(u.username);
+    importedUsers++;
+  }
+
+  // 导入主机（关联到对应用户，如果用户不存在则关联到当前管理员）
+  const oldToNewUserMap = {};
+  for (const u of (backupData.users || [])) {
+    if (u.role === 'admin') {
+      oldToNewUserMap[u.id] = currentAdminId; // 旧管理员的主机归当前管理员
+    } else {
+      const found = db.users.find(x => x.username === u.username);
+      if (found) oldToNewUserMap[u.id] = found.id;
+    }
+  }
+  let importedHosts = 0;
+  for (const h of (backupData.hosts || [])) {
+    const newUserId = oldToNewUserMap[h.userId] || currentAdminId;
+    if (!newUserId) continue;
+    db.hosts.push({ ...h, userId: newUserId });
+    importedHosts++;
+  }
+
+  // 导入密钥
+  let importedKeys = 0;
+  for (const k of (backupData.keys || [])) {
+    const newUserId = oldToNewUserMap[k.userId] || currentAdminId;
+    if (!newUserId) continue;
+    db.keys.push({ ...k, userId: newUserId });
+    importedKeys++;
+  }
+
+  // tokens 和 loginLogs 不导入（新站点需要重新登录）
+  // 站点配置保留当前设置（regEnabled, localTerminalEnabled, backup）
+
+  saveDB();
+  res.json({
+    ok: true,
+    importedUsers,
+    importedHosts,
+    importedKeys,
+    message: `导入完成：用户 ${importedUsers}、主机 ${importedHosts}、密钥 ${importedKeys}`
+  });
 });
 
 /* ---------------- socket.io（SSH 会话） ---------------- */

@@ -2260,6 +2260,75 @@ $('#btnBkRun').addEventListener('click', async () => {
   } catch (e) { toast('备份失败：' + e.message, 'err'); await loadBackupCfg(); }
 });
 
+// 下载备份
+$('#btnBkDownload').addEventListener('click', () => {
+  toast('正在生成备份…');
+  fetch('/api/admin/backup/download', { headers: { 'Authorization': 'Bearer ' + state.token } })
+    .then(r => {
+      if (!r.ok) throw new Error('下载失败');
+      return r.blob();
+    })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'qxuessh-backup-' + new Date().toISOString().slice(0,10) + '.tar.gz';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('备份已下载', 'ok');
+    })
+    .catch(e => toast('下载失败：' + e.message, 'err'));
+});
+
+// 数据导入
+let importFileData = null;
+$('#btnImportOpen').addEventListener('click', () => {
+  importFileData = null;
+  $('#importFile').value = '';
+  $('#importFileInfo').textContent = '';
+  $('#importAdminPass').value = '';
+  $('#importResult').innerHTML = '';
+  openModal('importModal');
+});
+
+$('#importFile').addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (f.size > 15 * 1024 * 1024) {
+    $('#importFileInfo').textContent = '文件过大（超过15MB）';
+    importFileData = null;
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    importFileData = btoa(String.fromCharCode(...new Uint8Array(reader.result)));
+    $('#importFileInfo').textContent = `已选择：${f.name}（${fmtBytes(f.size)}）`;
+  };
+  reader.readAsArrayBuffer(f);
+});
+
+$('#btnImportOk').addEventListener('click', async () => {
+  if (!importFileData) return toast('请先选择备份文件', 'err');
+  const pass = $('#importAdminPass').value.trim();
+  if (!pass) return toast('请输入旧站点管理员密码', 'err');
+  const btn = $('#btnImportOk');
+  btn.disabled = true;
+  btn.textContent = '导入中…';
+  $('#importResult').innerHTML = '';
+  try {
+    const r = await api('/admin/import', { method: 'POST', body: { fileB64: importFileData, adminPassword: pass } });
+    $('#importResult').innerHTML = `<div style="color:var(--ok);padding:8px;background:var(--bg2);border-radius:6px">${r.message}</div>`;
+    toast('导入成功', 'ok');
+    setTimeout(() => { closeModal('importModal'); location.reload(); }, 1500);
+  } catch (e) {
+    $('#importResult').innerHTML = `<div style="color:var(--err);padding:8px;background:var(--bg2);border-radius:6px">${e.message}</div>`;
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '开始导入';
+  }
+});
+
 function renderAdminPage() {
   const list = $('#adUserList');
   const total = adminUsers.length;

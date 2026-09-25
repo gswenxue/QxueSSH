@@ -486,13 +486,35 @@
                 <button class="btn btn-sm" id="btnBkTest">测试连接</button>
                 <button class="btn btn-sm btn-primary" id="btnBkSave">保存配置</button>
                 <button class="btn btn-sm btn-primary" id="btnBkRun">立即备份</button>
+                <button class="btn btn-sm" id="btnBkDownload">下载备份</button>
+                <button class="btn btn-sm" id="btnImportOpen">数据导入</button>
               </div>
-              <p class="tip" style="margin-top:10px">备份内容：站点数据（用户/主机/快捷键）+ 整站代码，打包为 tar.gz 上传。服务器本地同时保留最近 N 份，双重保险。恢复方法：下载备份解压到站点目录后重启服务即可。</p>
+              <p class="tip" style="margin-top:10px">备份内容：仅站点数据（用户/主机/密钥/配置），打包为 tar.gz。数据导入需验证旧站点管理员密码，失败3次锁定15分钟；导入后当前管理员保留，旧管理员数据（主机/密钥）自动归属当前管理员。</p>
               <div id="bkStatus" class="bk-status"></div>
               <div id="bkLog" class="bk-log"></div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数据导入弹窗 -->
+  <div class="modal-mask hidden" id="importModal">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span>数据导入</span>
+        <button class="modal-close" data-close="importModal">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="tip">选择备份文件（.tar.gz 或 .json），输入旧站点管理员密码验证后导入。当前站点管理员保留，旧管理员的主机/密钥将归属当前管理员。</p>
+        <label>备份文件</label>
+        <input type="file" id="importFile" accept=".tar.gz,.json,.gz">
+        <div id="importFileInfo" class="tip" style="margin:6px 0"></div>
+        <label>旧站点管理员密码</label>
+        <input type="password" id="importAdminPass" placeholder="输入备份文件中管理员的密码">
+        <button class="btn btn-primary btn-block" id="btnImportOk" style="margin-top:12px">开始导入</button>
+        <div id="importResult" style="margin-top:10px"></div>
       </div>
     </div>
   </div>
