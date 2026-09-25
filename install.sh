@@ -318,7 +318,7 @@ cat > "$INSTALL_DIR/data/db.json" <<DBEOF
   "tokens": {},
   "keys": [],
   "loginLogs": {},
-  "regEnabled": true,
+  "regEnabled": false,
   "localTerminalEnabled": false,
   "meta": { "lastSync": 0 },
   "backup": {

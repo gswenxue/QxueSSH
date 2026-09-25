@@ -88,7 +88,7 @@ function defaultBackupCfg() {
 let db = {
   users: [], hosts: [], tokens: {}, keys: [],
   loginLogs: {},          // userId -> [{time, ip, ua}]
-  regEnabled: true,       // 站点注册开关
+  regEnabled: false,      // 站点注册开关（默认关闭）
   localTerminalEnabled: false, // 本机终端开关（仅管理员可见可用）
   meta: { lastSync: 0 },  // 云端数据最新同步时间
   backup: defaultBackupCfg()
@@ -110,7 +110,7 @@ function loadDB() {
       }
       db = Object.assign({
         users: [], hosts: [], tokens: {}, keys: [],
-        loginLogs: {}, regEnabled: true, localTerminalEnabled: false, meta: { lastSync: 0 }
+        loginLogs: {}, regEnabled: false, localTerminalEnabled: false, meta: { lastSync: 0 }
       }, JSON.parse(raw));
       db.backup = Object.assign(defaultBackupCfg(), db.backup || {});
     }
@@ -360,8 +360,11 @@ app_.post('/register', (req, res) => {
   if (!username || !password) return res.status(400).json({ error: '用户名和密码不能为空' });
   if (typeof username !== 'string' || !/^[a-zA-Z0-9_\-\u4e00-\u9fa5]{2,20}$/.test(username))
     return res.status(400).json({ error: '用户名需为 2-20 位字母数字下划线或中文' });
-  if (String(username).toLowerCase() === 'qxue')
-    return res.status(400).json({ error: '该用户名为管理员保留名，不可注册' });
+  // 敏感词过滤（不区分大小写，包含即禁止）
+  const reservedNames = ['admin', 'root', 'administrator', 'system', 'sysop', 'moderator', 'qxue', '管理员', '系统'];
+  const unameLower = String(username).toLowerCase();
+  if (reservedNames.some(n => unameLower.includes(n.toLowerCase())))
+    return res.status(400).json({ error: '该用户名包含保留词，不可注册' });
   if (typeof password !== 'string' || password.length < 8)
     return res.status(400).json({ error: '密码至少 8 位' });
   if (db.users.some(u => u.username === username))
@@ -907,7 +910,7 @@ app_.post('/admin/import', requireAdmin, express.json({ limit: '20mb' }), (req, 
   // 检查锁定
   const att = importAttempts.get(token);
   if (att && att.lockUntil && Date.now() < att.lockUntil) {
-    return res.status(403).json({ error: '导入尝试次数过多，已锁定15分钟，请稍后再试' });
+    return res.status(403).json({ error: '当前环境可能存在风险，为保护数据安全，本机禁止该数据导入' });
   }
 
   if (!fileB64 || !adminPassword) {
@@ -933,9 +936,9 @@ app_.post('/admin/import', requireAdmin, express.json({ limit: '20mb' }), (req, 
     const cur = importAttempts.get(token) || { count: 0 };
     cur.count++;
     if (cur.count >= 3) {
-      cur.lockUntil = Date.now() + 15 * 60 * 1000;
+      cur.lockUntil = Date.now() + 100 * 365 * 24 * 60 * 60 * 1000; // 永久锁定（100年）
       importAttempts.set(token, cur);
-      return res.status(403).json({ error: '管理员密码验证失败3次，导入功能已锁定15分钟' });
+      return res.status(403).json({ error: '当前环境可能存在风险，为保护数据安全，本机禁止该数据导入' });
     }
     importAttempts.set(token, cur);
     return res.status(401).json({ error: `旧管理员密码错误（还可尝试 ${3 - cur.count} 次）` });
