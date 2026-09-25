@@ -996,10 +996,51 @@ io.on('connection', (socket) => {
   socket.on('c:ssh:close', ({ connId } = {}) => closeSession(connId));
 
   /* --- SFTP 文件管理 --- */
+  // 本地 SFTP 模拟对象（用于本机终端，用 fs 模块代替 ssh2 sftp）
+  function createLocalSftp() {
+    const toStats = (st) => ({
+      size: st.size,
+      mtime: Math.floor(st.mtimeMs / 1000),
+      mode: st.mode,
+      isDirectory: () => st.isDirectory(),
+      isSymbolicLink: () => st.isSymbolicLink(),
+      isFile: () => st.isFile()
+    });
+    return {
+      readdir(p, cb) {
+        fs.readdir(p, { withFileTypes: true }, (err, entries) => {
+          if (err) return cb(err);
+          const items = entries.map(e => {
+            try {
+              const st = fs.statSync(path.join(p, e.name));
+              return { filename: e.name, attrs: toStats(st) };
+            } catch {
+              return { filename: e.name, attrs: toStats({ size: 0, mtimeMs: 0, mode: 0, isDirectory: () => e.isDirectory(), isSymbolicLink: () => e.isSymbolicLink(), isFile: () => e.isFile() }) };
+            }
+          });
+          cb(null, items);
+        });
+      },
+      stat(p, cb) {
+        fs.stat(p, (err, st) => { if (err) return cb(err); cb(null, toStats(st)); });
+      },
+      createReadStream(p) { return fs.createReadStream(p); },
+      createWriteStream(p) { return fs.createWriteStream(p); },
+      mkdir(p, cb) { fs.mkdir(p, { recursive: false }, cb); },
+      rmdir(p, cb) { fs.rmdir(p, cb); },
+      unlink(p, cb) { fs.unlink(p, cb); },
+      rename(a, b, cb) { fs.rename(a, b, cb); },
+      on() { return this; }
+    };
+  }
+
   function withSftp(connId, cb) {
     const s = getSession(connId);
     if (!s) return cb(new Error('连接不存在'));
-    if (s.isLocal) return cb(new Error('本机终端暂不支持文件管理'));
+    if (s.isLocal) {
+      if (!s.sftp) s.sftp = createLocalSftp();
+      return cb(null, s.sftp, s);
+    }
     if (s.sftp) return cb(null, s.sftp, s);
     if (s.sftpLoading) return cb(new Error('SFTP 初始化中，请稍候'));
     s.sftpLoading = true;
@@ -1169,6 +1210,9 @@ io.on('connection', (socket) => {
   socket.on('c:sftp:home', ({ connId } = {}, ack) => {
     const s = getSession(connId);
     if (!s) return ack && ack({ error: '连接不存在' });
+    if (s.isLocal) {
+      return ack && ack({ path: process.env.HOME || require('os').homedir() || '/root' });
+    }
     s.client.exec('echo $HOME', (err, stream) => {
       if (err) return ack && ack({ error: err.message });
       let out = '';
@@ -1180,6 +1224,14 @@ io.on('connection', (socket) => {
   /* --- Docker 容器管理 --- */
   // 在 SSH 会话上执行命令并收集输出（cb: err, stdout, stderr, exitCode）
   function sshExec(s, cmd, cb) {
+    // 本机终端：用 child_process 执行命令
+    if (s.isLocal) {
+      exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err && !stdout && !stderr) return cb(err.message);
+        cb(null, stdout || '', stderr || '', err ? (err.code || 1) : 0);
+      });
+      return;
+    }
     s.client.exec(cmd, (err, stream) => {
       if (err) return cb(err.message);
       let out = '', errOut = '', code = 0;
