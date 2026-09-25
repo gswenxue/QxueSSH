@@ -17,7 +17,48 @@ const { exec } = require('child_process');
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const KEY_FILE = path.join(DATA_DIR, '.key');
 const MONITOR_INTERVAL = 2000;
+
+/* ---------------- 数据库加密（AES-256-GCM，透明加解密） ---------------- */
+function getDBKey() {
+  // 密钥文件不存在则生成（32字节随机密钥，base64存储，权限600）
+  if (!fs.existsSync(KEY_FILE)) {
+    const key = crypto.randomBytes(32).toString('base64');
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(KEY_FILE, key, { mode: 0o600 });
+    return Buffer.from(key, 'base64');
+  }
+  const key = fs.readFileSync(KEY_FILE, 'utf8').trim();
+  return Buffer.from(key, 'base64');
+}
+
+function encryptDB(jsonStr) {
+  const key = getDBKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(jsonStr, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  // 加密文件格式：JSON 包装，含版本号便于后续升级
+  return JSON.stringify({ v: 1, iv: iv.toString('base64'), tag: tag.toString('base64'), data: enc.toString('base64') });
+}
+
+function decryptDB(encStr) {
+  try {
+    const obj = JSON.parse(encStr);
+    if (!obj.v || !obj.iv || !obj.tag || !obj.data) return null;
+    const key = getDBKey();
+    const iv = Buffer.from(obj.iv, 'base64');
+    const tag = Buffer.from(obj.tag, 'base64');
+    const data = Buffer.from(obj.data, 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const dec = Buffer.concat([decipher.update(data), decipher.final()]);
+    return dec.toString('utf8');
+  } catch (e) {
+    return null;
+  }
+}
 
 /* ---------------- 安全策略常量 ---------------- */
 const TOKEN_TTL = 3 * 24 * 60 * 60 * 1000;        // token 有效期 3 天
@@ -54,12 +95,23 @@ let db = {
 };
 
 function loadDB() {
+  let isPlaintext = false;
   try {
     if (fs.existsSync(DB_FILE)) {
+      let raw = fs.readFileSync(DB_FILE, 'utf8');
+      // 尝试解密（加密文件以 { 开头但包含 v/iv/tag/data 字段）
+      const decrypted = decryptDB(raw);
+      if (decrypted !== null) {
+        raw = decrypted;
+      } else {
+        // 明文文件：首次加载后自动加密保存
+        isPlaintext = true;
+        console.log('[信息] 检测到明文数据库，将自动加密存储');
+      }
       db = Object.assign({
         users: [], hosts: [], tokens: {}, keys: [],
         loginLogs: {}, regEnabled: true, localTerminalEnabled: false, meta: { lastSync: 0 }
-      }, JSON.parse(fs.readFileSync(DB_FILE, 'utf8')));
+      }, JSON.parse(raw));
       db.backup = Object.assign(defaultBackupCfg(), db.backup || {});
     }
   } catch (e) {
@@ -95,6 +147,16 @@ function loadDB() {
     saveDB();
     console.log('已创建默认管理员账户: Qxue / Qxue2026');
   }
+  // 明文数据库自动加密保存
+  if (isPlaintext) {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(DB_FILE, encryptDB(JSON.stringify(db, null, 2)));
+      console.log('[信息] 数据库已加密存储');
+    } catch (e) {
+      console.error('加密数据库失败:', e.message);
+    }
+  }
 }
 
 let saveTimer = null;
@@ -103,7 +165,7 @@ function saveDB() {
   saveTimer = setTimeout(() => {
     try {
       fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+      fs.writeFileSync(DB_FILE, encryptDB(JSON.stringify(db, null, 2)));
     } catch (e) {
       console.error('保存数据库失败:', e.message);
     }
@@ -544,7 +606,7 @@ app_.post('/sync/push', requireAuth, (req, res) => {
   db.meta.lastSync = Date.now();
   saveDB();
   // 强制立即写盘（saveDB 是延迟的）
-  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); } catch (e) { /* ignore */ }
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(DB_FILE, encryptDB(JSON.stringify(db, null, 2))); } catch (e) { /* ignore */ }
   res.json({ lastSync: db.meta.lastSync });
 });
 
@@ -670,7 +732,7 @@ function buildBackupArchive() {
     try {
       // 先同步落盘数据库，确保备份里的数据是最新的
       fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+      fs.writeFileSync(DB_FILE, encryptDB(JSON.stringify(db, null, 2)));
       fs.mkdirSync(BACKUP_DIR, { recursive: true });
       const d = new Date();
       const p = n => String(n).padStart(2, '0');
