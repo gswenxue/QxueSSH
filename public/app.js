@@ -2288,7 +2288,7 @@ $('#btnImportOpen').addEventListener('click', () => {
   $('#importFileInfo').textContent = '';
   $('#importAdminPass').value = '';
   $('#importResult').innerHTML = '';
-  openModal('importModal');
+  showEl('importModal');
 });
 
 $('#importFile').addEventListener('change', (e) => {
@@ -2319,7 +2319,7 @@ $('#btnImportOk').addEventListener('click', async () => {
     const r = await api('/admin/import', { method: 'POST', body: { fileB64: importFileData, adminPassword: pass } });
     $('#importResult').innerHTML = `<div style="color:var(--ok);padding:8px;background:var(--bg2);border-radius:6px">${r.message}</div>`;
     toast('导入成功', 'ok');
-    setTimeout(() => { closeModal('importModal'); location.reload(); }, 1500);
+    setTimeout(() => { hideEl('importModal'); location.reload(); }, 1500);
   } catch (e) {
     $('#importResult').innerHTML = `<div style="color:var(--err);padding:8px;background:var(--bg2);border-radius:6px">${e.message}</div>`;
     toast(e.message, 'err');
