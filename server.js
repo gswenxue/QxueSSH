@@ -729,11 +729,11 @@ function webdavTest() {
   });
 }
 
-/* 打包备份：data/db.json + server.js + public/ + package.json -> tar.gz */
+/* 打包备份：仅 data/db.json（明文导出，便于跨机器迁移） */
 function buildBackupArchive() {
   return new Promise((resolve, reject) => {
     try {
-      // 先同步落盘数据库，确保备份里的数据是最新的
+      // 先同步落盘数据库，确保内存数据最新
       fs.mkdirSync(DATA_DIR, { recursive: true });
       fs.writeFileSync(DB_FILE, encryptDB(JSON.stringify(db, null, 2)));
       fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -741,9 +741,15 @@ function buildBackupArchive() {
       const p = n => String(n).padStart(2, '0');
       const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
       const file = path.join(BACKUP_DIR, `qxuessh-backup-${stamp}.tar.gz`);
-      // 只备份重要数据 db.json，不打包整站代码
+      // 创建临时目录，导出明文 db.json（备份文件由用户保管，明文便于跨机器导入）
+      const os = require('os');
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qxue-backup-'));
+      const tmpDataDir = path.join(tmpDir, 'data');
+      fs.mkdirSync(tmpDataDir, { recursive: true });
+      fs.writeFileSync(path.join(tmpDataDir, 'db.json'), JSON.stringify(db, null, 2));
       execFile('tar', ['czf', file, 'data/db.json'],
-        { cwd: __dirname }, (err) => {
+        { cwd: tmpDir }, (err) => {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
           if (err) return reject(new Error('打包失败: ' + err.message));
           resolve(file);
         });
@@ -867,6 +873,27 @@ const importAttempts = new Map();
 
 // 解析备份文件内容，返回 db 对象
 function parseBackupFile(buffer) {
+  const parseJson = (raw) => {
+    // 检测是否为加密格式（含 v/iv/tag/data 字段）
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && obj.v && obj.iv && obj.tag && obj.data) {
+        // 是加密格式，尝试解密
+        const dec = decryptDB(raw);
+        if (dec === null) throw new Error('备份文件已加密，无法在本机解密（请在原机器上导出，或使用明文备份）');
+        raw = dec;
+      }
+    } catch (e) {
+      if (e.message.includes('加密')) throw e;
+      // 不是 JSON 或不是加密格式，继续
+    }
+    const result = JSON.parse(raw);
+    if (!result || !Array.isArray(result.users)) {
+      throw new Error('备份文件格式错误，未找到有效的用户数据');
+    }
+    return result;
+  };
+
   // 尝试作为 tar.gz 解压
   try {
     const { execFileSync } = require('child_process');
@@ -881,23 +908,21 @@ function parseBackupFile(buffer) {
     ];
     for (const p of candidates) {
       if (fs.existsSync(p)) {
-        let raw = fs.readFileSync(p, 'utf8');
-        const dec = decryptDB(raw);
-        if (dec !== null) raw = dec;
-        const result = JSON.parse(raw);
+        const raw = fs.readFileSync(p, 'utf8');
         fs.rmSync(tmpDir, { recursive: true, force: true });
-        return result;
+        return parseJson(raw);
       }
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
-  } catch (e) { /* 不是 tar.gz，继续尝试纯 JSON */ }
+  } catch (e) {
+    if (e.message && (e.message.includes('加密') || e.message.includes('格式错误'))) throw e;
+    // 不是 tar.gz，继续尝试纯 JSON
+  }
   // 尝试作为纯 JSON
   try {
-    let raw = buffer.toString('utf8');
-    const dec = decryptDB(raw);
-    if (dec !== null) raw = dec;
-    return JSON.parse(raw);
+    return parseJson(buffer.toString('utf8'));
   } catch (e) {
+    if (e.message && (e.message.includes('加密') || e.message.includes('格式错误'))) throw e;
     throw new Error('无法解析备份文件格式');
   }
 }
