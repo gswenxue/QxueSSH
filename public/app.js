@@ -546,7 +546,7 @@ function createSession({ label, hostId, creds, isLocal }) {
     theme: TERM_THEMES[state.settings.theme] || TERM_THEMES['qxue-dark'],
     cursorBlink: true,
     scrollback: 5000,
-    convertEol: false
+    convertEol: true
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
