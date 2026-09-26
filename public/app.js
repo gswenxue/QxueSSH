@@ -552,6 +552,12 @@ function createSession({ label, hostId, creds, isLocal }) {
   term.loadAddon(fit);
   term.open(box);
   fit.fit();
+  // 多次延迟 fit，确保容器布局完成后尺寸正确（解决终端只占上半部分的问题）
+  [50, 150, 300].forEach(ms => setTimeout(() => {
+    if (box.classList.contains('active')) {
+      try { fit.fit(); socket.emit('c:ssh:resize', { connId, cols: term.cols, rows: term.rows }); } catch (e) { /* ignore */ }
+    }
+  }, ms));
 
   term.onData(data => {
     if (state.ctrlArmed && data.length === 1) {
@@ -609,9 +615,13 @@ function switchSession(connId) {
     const active = c.connId === connId;
     c.box.classList.toggle('active', active);
     c.tabEl.classList.toggle('active', active);
-    if (active && c.fit) setTimeout(() => {
-      try { c.fit.fit(); socket.emit('c:ssh:resize', { connId: c.connId, cols: c.term.cols, rows: c.term.rows }); } catch (e) { /* ignore */ }
-    }, 30);
+    if (active && c.fit) {
+      // 用 requestAnimationFrame 确保 display 切换后布局完成再 fit
+      requestAnimationFrame(() => {
+        try { c.fit.fit(); socket.emit('c:ssh:resize', { connId: c.connId, cols: c.term.cols, rows: c.term.rows }); } catch (e) { /* ignore */ }
+        setTimeout(() => { try { c.fit.fit(); socket.emit('c:ssh:resize', { connId: c.connId, cols: c.term.cols, rows: c.term.rows }); } catch (e) { /* ignore */ } }, 50);
+      });
+    }
   }
   updateMonitorDisplay();
   // 文件面板跟随当前激活的连接切换（不同主机路径无意义，重置后进入 HOME）
