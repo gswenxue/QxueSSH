@@ -1659,7 +1659,15 @@ function pasteClipboard() {
   // 优先尝试直接读剪贴板（HTTPS / 已授权），失败则弹粘贴框（兼容 HTTP 与手机）
   if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
     navigator.clipboard.readText()
-      .then(text => { if (text) c.term.paste(text); else openPasteModal(); })
+      .then(text => {
+        if (text) {
+          text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          socket.emit('c:ssh:input', { connId: c.connId, data: text });
+          c.term.focus();
+        } else {
+          openPasteModal();
+        }
+      })
       .catch(() => openPasteModal());
   } else {
     openPasteModal();
@@ -1675,10 +1683,13 @@ function openPasteModal() {
 
 $('#btnPasteOk').addEventListener('click', () => {
   const c = activeTerm();
-  const text = $('#pasteArea').value;
+  let text = $('#pasteArea').value;
   hideEl('pasteModal');
   if (c && c.status === 'connected' && text) {
-    c.term.paste(text);
+    // 规范化换行符：Windows \r\n -> \n，单独 \r -> \n
+    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    // 直接通过 socket 一次性发送，避免 term.paste() 长文本处理问题
+    socket.emit('c:ssh:input', { connId: c.connId, data: text });
     c.term.focus();
   }
 });
