@@ -266,6 +266,7 @@ body {
 .m-bar-fill.crit { background: var(--danger); }
 .mon-kv { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
 .mon-kv span:first-child { color: var(--fg-dim); }
+.mon-kv .cpu-model { max-width: 65%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .proc-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; font-family: ui-monospace, monospace; }
 .proc-row .p-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proc-row span { color: var(--fg-dim); margin-left: 10px; flex-shrink: 0; }

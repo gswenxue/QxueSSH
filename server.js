@@ -1101,6 +1101,10 @@ const MONITOR_CMD = [
   // 系统版本（兼容 Alpine / Debian / Ubuntu 等，均有 /etc/os-release）
   'echo "OS=`cat /etc/os-release 2>/dev/null | grep \'^PRETTY_NAME=\' | cut -d= -f2 | tr -d \'"\'`"',
   'echo "CPU=`grep \'^cpu \' /proc/stat`"',
+  // CPU 核心数：优先 nproc，兼容 Alpine/BusyBox；回退到 /proc/cpuinfo 计数
+  'echo "CPUS=`nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 1`"',
+  // CPU 型号：x86 用 model name，ARM 用 Hardware，都没有则显示未知
+  'echo "CPUM=`grep -m1 \'model name\' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed \'s/^ *//\' || grep -m1 \'Hardware\' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed \'s/^ *//\' || echo 未知`"',
   'echo "MEMT=`grep \'^MemTotal:\' /proc/meminfo`"',
   'echo "MEMA=`grep \'^MemAvailable:\' /proc/meminfo`"',
   'echo "SWAPT=`grep \'^SwapTotal:\' /proc/meminfo`"',
@@ -1765,6 +1769,10 @@ function parseMonitor(out, prev) {
     prev = Object.assign({}, prev, { cpuTotal: total, cpuIdle: idle });
   }
 
+  // CPU 核心数和型号
+  const cpuCores = parseInt(get('CPUS=').trim()) || null;
+  const cpuModel = get('CPUM=').trim() || null;
+
   // 内存
   const memTotalKB = parseInt((get('MEMT=').match(/(\d+)/) || [0, 0])[1]);
   const memAvailKB = parseInt((get('MEMA=').match(/(\d+)/) || [0, 0])[1]);
@@ -1849,7 +1857,7 @@ function parseMonitor(out, prev) {
 
   return {
     os,
-    cpuPercent,
+    cpuPercent, cpuCores, cpuModel,
     mem: memPercent != null ? { percent: memPercent, totalKB: memTotalKB, availKB: memAvailKB } : null,
     swap,
     disk, disks, load, upSec,

@@ -820,7 +820,15 @@ function updateMonitorDisplay() {
       <div class="mc-value" style="font-size:14px">${escapeHtml(m.os)}</div>
     </div>`;
   }
-  html += mon('CPU 使用率', m.cpuPercent != null ? m.cpuPercent.toFixed(1) + '%' : '--', m.cpuPercent);
+  // CPU 使用率（含核心数和型号）
+  html += `
+  <div class="mon-card">
+    <div class="mc-title"><span>CPU 使用率</span><span>${m.cpuPercent != null ? fmtPercent(m.cpuPercent) : ''}</span></div>
+    <div class="mc-value">${m.cpuPercent != null ? m.cpuPercent.toFixed(1) + '%' : '--'}</div>
+    ${m.cpuPercent != null ? `<div class="m-bar"><div class="${barCls(m.cpuPercent)}" style="width:${m.cpuPercent}%"></div></div>` : ''}
+    ${m.cpuCores != null ? `<div class="mon-kv"><span>CPU 核心</span><span>${m.cpuCores} 核</span></div>` : ''}
+    ${m.cpuModel ? `<div class="mon-kv" title="${escapeHtml(m.cpuModel)}"><span>CPU 型号</span><span class="cpu-model">${escapeHtml(m.cpuModel)}</span></div>` : ''}
+  </div>`;
   if (m.mem) {
     const usedB = (m.mem.totalKB - m.mem.availKB) * 1024;
     const totalB = m.mem.totalKB * 1024;
