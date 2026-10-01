@@ -522,14 +522,16 @@ else
 fi
 
 # ---------- 获取本机 IP ----------
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+LOCAL_IP=$(hostname -I | awk '{print $1}')
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}    QxueSSH 部署完成！${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo -e "  访问地址: ${CYAN}http://${SERVER_IP}:${APP_PORT}${NC}"
+echo -e "  公网地址: ${CYAN}http://${SERVER_IP}:${APP_PORT}${NC}"
+echo -e "  本地地址: ${CYAN}http://${LOCAL_IP}:${APP_PORT}${NC}  (或 http://127.0.0.1:${APP_PORT})"
 echo -e "  管理员账号: ${CYAN}${ADMIN_USER}${NC}"
 echo -e "  管理员密码: ${CYAN}${ADMIN_PASS}${NC}"
 echo ""
