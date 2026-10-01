@@ -20,22 +20,29 @@ SERVICE_NAME="qxuessh"
 GIT_REPO="https://github.com/gswenxue/QxueSSH.git"
 NODE_VERSION="v20.18.1"
 
-# ---------- GitHub 代理（直连超时后依次尝试） ----------
-# 格式说明：
-#   ghproxy / gitclone：前缀拼接，如 https://ghproxy.com/https://github.com/...
-#   kkgithub：直接替换域名，如 https://kkgithub.com/...
-GITHUB_PROXIES=("https://ghproxy.com/" "https://gitclone.com/" "https://kkgithub.com/")
-HTTP_TIMEOUT=15
-HTTP_MAXTIME=180
+# ---------- GitHub 代理（直连超时后依次尝试，仅用于本次部署） ----------
+# 格式：类型|地址
+#   prefix = 前缀拼接，如 https://gh-proxy.com/https://github.com/...
+#   mirror = 替换域名，如 https://bgithub.xyz/...
+GITHUB_PROXIES=(
+  "prefix|https://gh-proxy.com/"
+  "mirror|https://bgithub.xyz"
+  "prefix|https://ghp.ci/"
+  "mirror|https://kkgithub.com"
+  "prefix|https://gitproxy.click/"
+)
+HTTP_TIMEOUT=8
+HTTP_MAXTIME=90
 
 # 构造代理后的 GitHub URL
-# $1=原始URL $2=代理前缀
+# $1=原始URL $2=代理条目（类型|地址）
 _proxy_url() {
-  local url="$1" proxy="$2"
-  if [ "$proxy" = "https://kkgithub.com/" ]; then
-    echo "$url" | sed 's|https://github.com/|https://kkgithub.com/|'
+  local url="$1" entry="$2"
+  local type="${entry%%|*}" addr="${entry#*|}"
+  if [ "$type" = "mirror" ]; then
+    echo "$url" | sed "s|https://github.com/|${addr}/|"
   else
-    echo "${proxy}${url}"
+    echo "${addr}${url}"
   fi
 }
 
@@ -47,9 +54,10 @@ download_with_proxy() {
     return 0
   fi
   # 2. 依次尝试代理
-  for proxy in "${GITHUB_PROXIES[@]}"; do
-    local p_url; p_url=$(_proxy_url "$url" "$proxy")
-    info "直连超时，尝试代理：${proxy}"
+  for entry in "${GITHUB_PROXIES[@]}"; do
+    local p_url; p_url=$(_proxy_url "$url" "$entry")
+    local addr="${entry#*|}"
+    info "直连超时，尝试代理：${addr}"
     if curl -sL --fail --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_MAXTIME" "$p_url" -o "$out" 2>/dev/null && [ -s "$out" ]; then
       ok "代理下载成功"
       return 0
@@ -66,9 +74,10 @@ clone_with_proxy() {
     return 0
   fi
   # 2. 依次尝试代理
-  for proxy in "${GITHUB_PROXIES[@]}"; do
-    local p_repo; p_repo=$(_proxy_url "$repo" "$proxy")
-    info "直连超时，尝试代理：${proxy}"
+  for entry in "${GITHUB_PROXIES[@]}"; do
+    local p_repo; p_repo=$(_proxy_url "$repo" "$entry")
+    local addr="${entry#*|}"
+    info "直连超时，尝试代理：${addr}"
     rm -rf "$dest"
     if git clone --depth 1 "$p_repo" "$dest" 2>/dev/null; then
       ok "代理克隆成功"
