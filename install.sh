@@ -522,8 +522,31 @@ else
 fi
 
 # ---------- 获取本机 IP ----------
-SERVER_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-LOCAL_IP=$(hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || true)
+
+# 获取内网可访问IP（排除回环、docker网桥、虚拟网卡）
+get_lan_ip() {
+  # 优先用 ip 命令，排除 lo/docker/veth/br-/tun/tap 等虚拟网卡
+  if command -v ip &>/dev/null; then
+    local ip_list
+    ip_list=$(ip -4 addr show 2>/dev/null | grep -E 'inet ' | awk '{print $2}' | cut -d/ -f1 | grep -v '^127\.' | grep -v '^172\.17\.' | grep -v '^172\.18\.' | grep -v '^172\.19\.' | grep -v '^172\.2[0-9]\.' | grep -v '^172\.3[0-1]\.' || true)
+    # 优先返回内网网段地址
+    local lan_ip
+    lan_ip=$(echo "$ip_list" | grep -E '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)' | head -1)
+    [ -n "$lan_ip" ] && echo "$lan_ip" && return
+    # 没有内网网段则返回第一个非回环IP
+    local first_ip
+    first_ip=$(echo "$ip_list" | head -1)
+    [ -n "$first_ip" ] && echo "$first_ip" && return
+  fi
+  # 回退：hostname -I，排除127开头
+  hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -v '^$' | head -1
+}
+LOCAL_IP=$(get_lan_ip)
+[ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
+
+# 如果公网IP获取失败，用内网IP代替显示
+[ -z "$SERVER_IP" ] && SERVER_IP="$LOCAL_IP"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
@@ -531,7 +554,7 @@ echo -e "${GREEN}    QxueSSH 部署完成！${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "  公网地址: ${CYAN}http://${SERVER_IP}:${APP_PORT}${NC}"
-echo -e "  本地地址: ${CYAN}http://${LOCAL_IP}:${APP_PORT}${NC}  (或 http://127.0.0.1:${APP_PORT})"
+echo -e "  内网地址: ${CYAN}http://${LOCAL_IP}:${APP_PORT}${NC}"
 echo -e "  管理员账号: ${CYAN}${ADMIN_USER}${NC}"
 echo -e "  管理员密码: ${CYAN}${ADMIN_PASS}${NC}"
 echo ""
