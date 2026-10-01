@@ -76,17 +76,18 @@ download_with_proxy() {
 # 带代理回退的 git clone：$1=仓库URL $2=目标目录
 clone_with_proxy() {
   local repo="$1" dest="$2"
-  # 1. 直连
-  if git clone --depth 1 "$repo" "$dest" 2>/dev/null; then
+  local GIT_TIMEOUT=20
+  # 1. 直连（带超时）
+  if timeout "$GIT_TIMEOUT" git clone --depth 1 "$repo" "$dest" 2>/dev/null; then
     return 0
   fi
-  # 2. 依次尝试代理
+  # 2. 依次尝试代理（带超时）
   for entry in "${GITHUB_PROXIES[@]}"; do
     local p_repo; p_repo=$(_proxy_url "$repo" "$entry")
     local addr="${entry#*|}"
     info "直连超时，尝试代理：${addr}"
     rm -rf "$dest"
-    if git clone --depth 1 "$p_repo" "$dest" 2>/dev/null; then
+    if timeout "$GIT_TIMEOUT" git clone --depth 1 "$p_repo" "$dest" 2>/dev/null; then
       ok "代理克隆成功"
       return 0
     fi
