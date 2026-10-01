@@ -39,7 +39,7 @@ GITHUB_PROXIES=(
   "mirror|https://github.ur1.fun"
 )
 HTTP_TIMEOUT=8
-HTTP_MAXTIME=90
+HTTP_MAXTIME=30
 
 # 构造代理后的 GitHub URL
 # $1=原始URL $2=代理条目（类型|地址）
@@ -560,5 +560,5 @@ echo -e "  管理员密码: ${CYAN}${ADMIN_PASS}${NC}"
 echo ""
 echo -e "  ${YELLOW}请妥善保存以上账号密码，登录后建议立即修改密码${NC}"
 echo ""
-echo -e "  管理命令: ${CYAN}qxuessh help${NC}（查看状态/改端口/自启动/重置密码）"
+echo -e "  管理命令: ${CYAN}qxuessh${NC}"
 echo ""
