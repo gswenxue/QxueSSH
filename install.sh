@@ -20,6 +20,64 @@ SERVICE_NAME="qxuessh"
 GIT_REPO="https://github.com/gswenxue/QxueSSH.git"
 NODE_VERSION="v20.18.1"
 
+# ---------- GitHub 代理（直连超时后依次尝试） ----------
+# 格式说明：
+#   ghproxy / gitclone：前缀拼接，如 https://ghproxy.com/https://github.com/...
+#   kkgithub：直接替换域名，如 https://kkgithub.com/...
+GITHUB_PROXIES=("https://ghproxy.com/" "https://gitclone.com/" "https://kkgithub.com/")
+HTTP_TIMEOUT=15
+HTTP_MAXTIME=180
+
+# 构造代理后的 GitHub URL
+# $1=原始URL $2=代理前缀
+_proxy_url() {
+  local url="$1" proxy="$2"
+  if [ "$proxy" = "https://kkgithub.com/" ]; then
+    echo "$url" | sed 's|https://github.com/|https://kkgithub.com/|'
+  else
+    echo "${proxy}${url}"
+  fi
+}
+
+# 带代理回退的下载：$1=原始URL $2=输出文件
+download_with_proxy() {
+  local url="$1" out="$2"
+  # 1. 直连
+  if curl -sL --fail --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_MAXTIME" "$url" -o "$out" 2>/dev/null && [ -s "$out" ]; then
+    return 0
+  fi
+  # 2. 依次尝试代理
+  for proxy in "${GITHUB_PROXIES[@]}"; do
+    local p_url; p_url=$(_proxy_url "$url" "$proxy")
+    info "直连超时，尝试代理：${proxy}"
+    if curl -sL --fail --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_MAXTIME" "$p_url" -o "$out" 2>/dev/null && [ -s "$out" ]; then
+      ok "代理下载成功"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 带代理回退的 git clone：$1=仓库URL $2=目标目录
+clone_with_proxy() {
+  local repo="$1" dest="$2"
+  # 1. 直连
+  if git clone --depth 1 "$repo" "$dest" 2>/dev/null; then
+    return 0
+  fi
+  # 2. 依次尝试代理
+  for proxy in "${GITHUB_PROXIES[@]}"; do
+    local p_repo; p_repo=$(_proxy_url "$repo" "$proxy")
+    info "直连超时，尝试代理：${proxy}"
+    rm -rf "$dest"
+    if git clone --depth 1 "$p_repo" "$dest" 2>/dev/null; then
+      ok "代理克隆成功"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ---------- 检查 root ----------
 if [ "$EUID" -ne 0 ]; then
   err "请使用 root 用户运行此脚本"
@@ -200,19 +258,25 @@ download_project() {
   info "下载 QxueSSH 项目..."
   mkdir -p "$(dirname "$INSTALL_DIR")"
 
-  # 优先 git clone，失败则下载 zip
+  # 优先 git clone（带代理回退），失败则下载 tar.gz（带代理回退）
   if command -v git &>/dev/null; then
-    git clone --depth 1 "$GIT_REPO" "$INSTALL_DIR" 2>/dev/null && ok "项目已克隆到 $INSTALL_DIR" && return
+    if clone_with_proxy "$GIT_REPO" "$INSTALL_DIR"; then
+      ok "项目已克隆到 $INSTALL_DIR"
+      return
+    fi
   fi
 
-  # 降级：下载 zip
+  # 降级：下载 tar.gz（带代理回退）
   local ZIP_URL="https://github.com/gswenxue/QxueSSH/archive/refs/heads/main.tar.gz"
-  info "git 不可用，使用压缩包下载..."
+  info "git 克隆失败，使用压缩包下载..."
   cd /tmp
-  curl -sL "$ZIP_URL" -o qxuessh.tar.gz || { err "项目下载失败"; exit 1; }
+  if ! download_with_proxy "$ZIP_URL" /tmp/qxuessh.tar.gz; then
+    err "项目下载失败（直连和所有代理均超时）"
+    exit 1
+  fi
   mkdir -p "$INSTALL_DIR"
-  tar -xzf qxuessh.tar.gz -C "$INSTALL_DIR" --strip-components=1
-  rm -f qxuessh.tar.gz
+  tar -xzf /tmp/qxuessh.tar.gz -C "$INSTALL_DIR" --strip-components=1
+  rm -f /tmp/qxuessh.tar.gz
   ok "项目已下载到 $INSTALL_DIR"
 }
 download_project
@@ -228,7 +292,7 @@ if [ "$PREBUILT_AVAILABLE" = "1" ]; then
   [ "$PREBUILT_LIBC" = "musl" ] && PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}-musl.tar.gz"
   PREBUILT_URL="https://github.com/gswenxue/QxueSSH/releases/download/prebuilt-v1/${PREBUILT_PKG}"
   info "尝试下载预编译 node_modules（${PREBUILT_PKG}）..."
-  if curl -sL --fail "$PREBUILT_URL" -o /tmp/qxue_node_modules.tar.gz 2>/dev/null && [ -s /tmp/qxue_node_modules.tar.gz ]; then
+  if download_with_proxy "$PREBUILT_URL" /tmp/qxue_node_modules.tar.gz; then
     tar -xzf /tmp/qxue_node_modules.tar.gz -C "$INSTALL_DIR"
     rm -f /tmp/qxue_node_modules.tar.gz
     if [ -d "$INSTALL_DIR/node_modules" ] && [ -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then
