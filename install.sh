@@ -30,6 +30,13 @@ GITHUB_PROXIES=(
   "prefix|https://ghp.ci/"
   "mirror|https://kkgithub.com"
   "prefix|https://gitproxy.click/"
+  "prefix|https://ghproxy.net/"
+  "mirror|https://hub.fastgit.org"
+  "prefix|https://github.akams.cn/"
+  "prefix|https://ghfast.top/"
+  "mirror|https://gitclone.com"
+  "prefix|https://moeyy.cn/gh-proxy/"
+  "mirror|https://github.ur1.fun"
 )
 HTTP_TIMEOUT=8
 HTTP_MAXTIME=90
