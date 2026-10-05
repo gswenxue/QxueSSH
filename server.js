@@ -1420,10 +1420,12 @@ io.on('connection', (socket) => {
         if (err2) return ack && ack({ error: err2.message });
         const done = e => ack && ack(e ? { error: e.message } : { ok: true });
         if (st.isDirectory()) {
-          sftp.readdir(p, (e3, items) => {
-            if (e3) return done(e3);
-            if (items.length > 0) return ack && ack({ error: '目录非空，请先清空内容' });
-            sftp.rmdir(p, done);
+          // 目录（含非空）：用 rm -rf 递归删除，支持 SSH 和本机终端
+          const s = getSession(connId);
+          const esc = v => "'" + String(v).replace(/'/g, "'\\''") + "'";
+          sshExec(s, `rm -rf -- ${esc(p)}`, (e3, stdout, stderr, code) => {
+            if (e3 || code !== 0) return ack && ack({ error: (stderr || e3 || '删除失败').toString().trim().split('\n')[0] });
+            ack && ack({ ok: true });
           });
         } else {
           sftp.unlink(p, done);
@@ -1561,6 +1563,34 @@ io.on('connection', (socket) => {
     sshExec(s, cmd, (err, stdout, stderr, code) => {
       if (err) return ack && ack({ error: err });
       if (code !== 0) return ack && ack({ error: (stderr || '').trim().split('\n')[0] || '压缩失败' });
+      ack && ack({ ok: true });
+    });
+  });
+
+  // 解压：将压缩包解压到指定目录
+  socket.on('c:sftp:extract', ({ connId, file, dest } = {}, ack) => {
+    const s = getSession(connId);
+    if (!s) return ack && ack({ error: '连接不存在' });
+    if (!file || !dest) return ack && ack({ error: '参数错误' });
+    const esc = v => "'" + String(v).replace(/'/g, "'\\''") + "'";
+    // 根据扩展名选择解压命令
+    let cmd;
+    if (/\.tar\.gz$|\.tgz$/i.test(file)) {
+      cmd = `mkdir -p ${esc(dest)} && tar -xzf ${esc(file)} -C ${esc(dest)}`;
+    } else if (/\.tar\.bz2$|\.tbz2?$/i.test(file)) {
+      cmd = `mkdir -p ${esc(dest)} && tar -xjf ${esc(file)} -C ${esc(dest)}`;
+    } else if (/\.tar\.xz$|\.txz$/i.test(file)) {
+      cmd = `mkdir -p ${esc(dest)} && tar -xJf ${esc(file)} -C ${esc(dest)}`;
+    } else if (/\.tar$/i.test(file)) {
+      cmd = `mkdir -p ${esc(dest)} && tar -xf ${esc(file)} -C ${esc(dest)}`;
+    } else if (/\.zip$/i.test(file)) {
+      cmd = `mkdir -p ${esc(dest)} && unzip -o ${esc(file)} -d ${esc(dest)}`;
+    } else {
+      return ack && ack({ error: '不支持的压缩格式（支持 tar.gz/tgz/tar.bz2/tar.xz/tar/zip）' });
+    }
+    sshExec(s, cmd, (err, stdout, stderr, code) => {
+      if (err) return ack && ack({ error: err });
+      if (code !== 0) return ack && ack({ error: (stderr || '').trim().split('\n')[0] || '解压失败' });
       ack && ack({ ok: true });
     });
   });

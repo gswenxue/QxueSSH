@@ -1264,7 +1264,7 @@ function renderFiles(list) {
     });
     row.querySelector('.dl').addEventListener('click', () => downloadFile(full, name));
     row.querySelector('.del').addEventListener('click', () => {
-      confirmDlg('删除', `确定删除「${name}」${type === 'dir' ? '（目录需为空）' : ''}吗？`, () => {
+      confirmDlg('删除', `确定删除「${name}」${type === 'dir' ? '（目录及其所有内容将被递归删除）' : ''}吗？`, () => {
         sftpCall('c:sftp:delete', { path: full }, () => { toast('已删除', 'ok'); listFiles(state.filePath); });
       });
     });
@@ -1423,6 +1423,28 @@ $('#btnBatchCompress').addEventListener('click', () => {
     toast('正在压缩，文件较多时可能需要一些时间…');
     sftpCall('c:sftp:compress', { dir: state.filePath, names, out: name }, () => {
       toast('压缩完成：' + name, 'ok');
+      exitMulti();
+      listFiles(state.filePath);
+    });
+  });
+});
+
+// 批量解压：解压选中的压缩包到当前目录
+$('#btnBatchExtract').addEventListener('click', () => {
+  if (!currentFileConn()) { toast('请先连接主机', 'err'); return; }
+  const names = [...state.fileSel];
+  if (!names.length) return;
+  // 过滤出支持的压缩格式
+  const archives = names.filter(n => /\.(tar\.gz|tgz|tar\.bz2|tbz2?|tar\.xz|txz|tar|zip)$/i.test(n));
+  if (!archives.length) { toast('请选中压缩文件（tar.gz/tgz/zip/tar等）', 'err'); return; }
+  if (archives.length > 1) { toast('一次只能解压一个压缩包', 'err'); return; }
+  const archive = archives[0];
+  const archivePath = state.filePath === '/' ? '/' + archive : state.filePath + '/' + archive;
+  inputDlg('解压', '解压到目录（留空则解压到当前目录）', state.filePath, v => {
+    const dest = (v || '').trim() || state.filePath;
+    toast('正在解压：' + archive);
+    sftpCall('c:sftp:extract', { file: archivePath, dest }, () => {
+      toast('解压完成：' + archive, 'ok');
       exitMulti();
       listFiles(state.filePath);
     });
