@@ -53,22 +53,39 @@ _proxy_url() {
   fi
 }
 
-# 带代理回退的下载：$1=原始URL $2=输出文件
+# 带代理回退的下载：$1=原始URL $2=输出文件 $3=期望类型(gzip/xz/空=不验证)
 download_with_proxy() {
-  local url="$1" out="$2"
+  local url="$1" out="$2" expect="${3:-}"
+  # 验证文件是否符合期望类型
+  _verify_file() {
+    local f="$1"
+    [ -s "$f" ] || return 1
+    # 坏代理检测：HTML 跳转页（以 < 开头且包含 html/DOCTYPE/script）
+    local head; head=$(head -c 200 "$f" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    if echo "$head" | grep -qE '^<(!doctype|html|head|script|meta|title)'; then
+      return 1
+    fi
+    case "$expect" in
+      gzip) gzip -t "$f" 2>/dev/null ;;
+      xz)   xz -t "$f" 2>/dev/null ;;
+      *)    return 0 ;;
+    esac
+  }
   # 1. 直连
-  if curl -sL --fail --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_MAXTIME" "$url" -o "$out" 2>/dev/null && [ -s "$out" ]; then
+  if curl -sL --fail --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_MAXTIME" "$url" -o "$out" 2>/dev/null && _verify_file "$out"; then
     return 0
   fi
+  rm -f "$out"
   # 2. 依次尝试代理
   for entry in "${GITHUB_PROXIES[@]}"; do
     local p_url; p_url=$(_proxy_url "$url" "$entry")
     local addr="${entry#*|}"
     info "直连超时，尝试代理：${addr}"
-    if curl -sL --fail --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_MAXTIME" "$p_url" -o "$out" 2>/dev/null && [ -s "$out" ]; then
+    if curl -sL --fail --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_MAXTIME" "$p_url" -o "$out" 2>/dev/null && _verify_file "$out"; then
       ok "代理下载成功"
       return 0
     fi
+    rm -f "$out"
   done
   return 1
 }
@@ -239,15 +256,31 @@ install_node() {
   if [ "$ARCH" = "aarch64" ]; then
     NODE_TAR="node-${NODE_VERSION}-linux-arm64.tar.xz"
   fi
-  local NODE_URL="https://nodejs.org/dist/${NODE_VERSION}/${NODE_TAR}"
+  # 优先清华镜像（国内速度快），失败回退官方
+  local NODE_URLS=(
+    "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/${NODE_VERSION}/${NODE_TAR}"
+    "https://npmmirror.com/mirrors/node/${NODE_VERSION}/${NODE_TAR}"
+    "https://nodejs.org/dist/${NODE_VERSION}/${NODE_TAR}"
+  )
 
   info "下载 Node.js ${NODE_VERSION}..."
   cd /tmp
-  if command -v wget &>/dev/null; then
-    wget -q "$NODE_URL" -o /dev/null -O "$NODE_TAR" || { err "下载失败，请检查网络"; exit 1; }
-  else
-    curl -sL "$NODE_URL" -o "$NODE_TAR" || { err "下载失败，请检查网络"; exit 1; }
-  fi
+  local downloaded=0
+  for node_url in "${NODE_URLS[@]}"; do
+    info "尝试下载源：${node_url}"
+    if curl -sL --fail --connect-timeout 10 --max-time 120 "$node_url" -o "$NODE_TAR" 2>/dev/null && [ -s "$NODE_TAR" ]; then
+      # 验证 xz 文件（文件头 0xFD 0x37 0x7A 0x58 0x5A 0x00）
+      if xz -t "$NODE_TAR" 2>/dev/null; then
+        ok "Node.js 下载成功"
+        downloaded=1
+        break
+      else
+        warn "下载的文件不是有效的 xz 压缩包，尝试下一个源..."
+        rm -f "$NODE_TAR"
+      fi
+    fi
+  done
+  [ "$downloaded" = "0" ] && { err "Node.js 下载失败（所有源均不可用）"; exit 1; }
 
   info "解压安装 Node.js 到 $NODE_DIR..."
   rm -rf "$NODE_DIR"
@@ -287,8 +320,8 @@ download_project() {
   local ZIP_URL="https://github.com/gswenxue/QxueSSH/archive/refs/heads/main.tar.gz"
   info "git 克隆失败，使用压缩包下载..."
   cd /tmp
-  if ! download_with_proxy "$ZIP_URL" /tmp/qxuessh.tar.gz; then
-    err "项目下载失败（直连和所有代理均超时）"
+  if ! download_with_proxy "$ZIP_URL" /tmp/qxuessh.tar.gz gzip; then
+    err "项目下载失败（直连和所有代理均超时或返回无效文件）"
     exit 1
   fi
   mkdir -p "$INSTALL_DIR"
@@ -305,20 +338,34 @@ info "安装 npm 依赖..."
 # 优先使用预编译 node_modules（跳过本地编译，节省时间和内存）
 PREBUILT_OK=0
 if [ "$PREBUILT_AVAILABLE" = "1" ]; then
-  PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}.tar.gz"
-  [ "$PREBUILT_LIBC" = "musl" ] && PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}-musl.tar.gz"
-  PREBUILT_URL="https://github.com/gswenxue/QxueSSH/releases/download/prebuilt-v1/${PREBUILT_PKG}"
-  info "尝试下载预编译 node_modules（${PREBUILT_PKG}）..."
-  if download_with_proxy "$PREBUILT_URL" /tmp/qxue_node_modules.tar.gz; then
-    tar -xzf /tmp/qxue_node_modules.tar.gz -C "$INSTALL_DIR"
-    rm -f /tmp/qxue_node_modules.tar.gz
-    if [ -d "$INSTALL_DIR/node_modules" ] && [ -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then
-      ok "预编译 node_modules 已就绪（跳过本地编译）"
-      PREBUILT_OK=1
+  # 依赖已就绪则跳过下载
+  if [ -d "$INSTALL_DIR/node_modules" ] && [ -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then
+    ok "node_modules 已就绪，跳过预编译包下载"
+    PREBUILT_OK=1
+  else
+    PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}.tar.gz"
+    [ "$PREBUILT_LIBC" = "musl" ] && PREBUILT_PKG="node_modules-linux-${PREBUILT_ARCH}-musl.tar.gz"
+    PREBUILT_URL="https://github.com/gswenxue/QxueSSH/releases/download/prebuilt-v1/${PREBUILT_PKG}"
+    info "尝试下载预编译 node_modules（${PREBUILT_PKG}）..."
+    if download_with_proxy "$PREBUILT_URL" /tmp/qxue_node_modules.tar.gz gzip; then
+      # 解压前再次验证 gzip
+      if gzip -t /tmp/qxue_node_modules.tar.gz 2>/dev/null; then
+        tar -xzf /tmp/qxue_node_modules.tar.gz -C "$INSTALL_DIR"
+        rm -f /tmp/qxue_node_modules.tar.gz
+        if [ -d "$INSTALL_DIR/node_modules" ] && [ -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then
+          ok "预编译 node_modules 已就绪（跳过本地编译）"
+          PREBUILT_OK=1
+        else
+          warn "预编译包解压后缺少 pty.node，回退到本地编译..."
+        fi
+      else
+        warn "预编译包 gzip 验证失败，回退到本地编译..."
+        rm -f /tmp/qxue_node_modules.tar.gz
+      fi
     fi
-  fi
-  if [ "$PREBUILT_OK" = "0" ]; then
-    warn "预编译包下载失败，回退到本地编译..."
+    if [ "$PREBUILT_OK" = "0" ]; then
+      warn "预编译包下载失败，回退到本地编译..."
+    fi
   fi
 fi
 
